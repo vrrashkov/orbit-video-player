@@ -1,0 +1,18 @@
+[package]
+name = "nebula"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = ["ui"]
+
+[dependencies.ui]
+path = "ui"
+
+[dependencies]
+anyhow.workspace = true
+iced.workspace = true
+
+[workspace.dependencies]
+anyhow = "1.0"
+iced = "0.13.1"
