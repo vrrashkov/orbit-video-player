@@ -1,18 +1,22 @@
-use std::sync::Arc;
-
+use core::fmt;
 use nebula_common::{shader, VideoError};
+use std::sync::Arc;
 use winit::window::Window;
 
 pub struct VideoRenderer {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
-    pipeline: wgpu::RenderPipeline,
-    video_texture: wgpu::Texture,
-    video_bind_group: wgpu::BindGroup,
+    pub config: wgpu::SurfaceConfiguration,
+    pub pipeline: wgpu::RenderPipeline,
+    pub video_texture: wgpu::Texture,
+    pub video_bind_group: wgpu::BindGroup,
 }
-
+impl fmt::Debug for VideoRenderer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "VideoRenderer: {:?}", self.config)
+    }
+}
 impl VideoRenderer {
     pub async fn new(
         window: Arc<Window>,

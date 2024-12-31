@@ -12,7 +12,8 @@ iced.workspace = true
 
 [workspace.dependencies]
 anyhow = "1.0"
-iced = "0.13.1"
+iced = {version="0.13.1", features = ["advanced"]}
+iced_wgpu = "0.13.5"
 wgpu = "23.0"
 winit = "0.29"
 bytemuck = { version = "1.14", features = ["derive"] }

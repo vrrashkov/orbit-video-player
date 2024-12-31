@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 wgpu.workspace = true
+iced.workspace = true
+iced_wgpu.workspace = true
 ffmpeg-next.workspace = true
 winit.workspace = true
 tracing.workspace = true

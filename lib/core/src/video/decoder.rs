@@ -10,6 +10,7 @@ pub struct VideoDecoder {
     current_frame: u32,
     start_frame: u32,
     end_frame: u32,
+    looping: bool,
 }
 
 impl VideoDecoder {
@@ -66,6 +67,7 @@ impl VideoDecoder {
             current_frame: start_frame,
             start_frame,
             end_frame,
+            looping: false,
         })
     }
 
@@ -187,6 +189,17 @@ impl VideoDecoder {
     }
     pub fn current_frame(&self) -> u32 {
         self.current_frame
+    }
+
+    pub fn start_frame(&self) -> u32 {
+        self.start_frame
+    }
+    pub fn end_frame(&self) -> u32 {
+        self.end_frame
+    }
+
+    pub fn looping(&self) -> bool {
+        self.looping
     }
 
     pub fn total_frames(&self) -> u32 {

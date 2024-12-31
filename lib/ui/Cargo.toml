@@ -6,3 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 iced.workspace = true
+iced_wgpu.workspace = true
+tracing.workspace = true
+# LOCAL
+nebula-core.workspace = true

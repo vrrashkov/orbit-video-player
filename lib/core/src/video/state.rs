@@ -2,13 +2,12 @@ use nebula_common::VideoError;
 use std::sync::Arc;
 use winit::window::Window;
 
-use super::{decoder::VideoDecoder, renderer::VideoRenderer};
+use super::{decoder::VideoDecoder, primitive::VideoPrimitive, renderer::VideoRenderer};
 
 pub struct VideoState {
-    window: Arc<Window>,
-    decoder: VideoDecoder,
-    renderer: VideoRenderer,
-    is_playing: bool,
+    pub window: Arc<Window>,
+    pub decoder: VideoDecoder,
+    pub is_playing: bool,
 }
 impl VideoState {
     pub async fn new(
@@ -18,12 +17,19 @@ impl VideoState {
         end_frame: u32,
     ) -> Result<Self, VideoError> {
         let video_decoder = VideoDecoder::new(video_path, start_frame, end_frame).await?;
-        let renderer = VideoRenderer::new(
-            window.clone(),
-            video_decoder.decoder.width(),
-            video_decoder.decoder.height(),
-        )
-        .await?;
+        let renderer = VideoPrimitive::new(
+            inner.id,
+            Arc::clone(&inner.alive),
+            Arc::clone(&inner.frame),
+            (inner.width as _, inner.height as _),
+            upload_frame,
+        );
+        // let renderer = VideoRenderer::new(
+        //     window.clone(),
+        //     video_decoder.decoder.width(),
+        //     video_decoder.decoder.height(),
+        // )
+        // .await?;
 
         Ok(Self {
             window,
@@ -65,7 +71,15 @@ impl VideoState {
     pub fn current_frame(&self) -> u32 {
         self.decoder.current_frame()
     }
-
+    pub fn start_frame(&self) -> u32 {
+        self.decoder.start_frame()
+    }
+    pub fn end_frame(&self) -> u32 {
+        self.decoder.end_frame()
+    }
+    pub fn looping(&self) -> bool {
+        self.decoder.looping()
+    }
     pub fn total_frames(&self) -> u32 {
         self.decoder.total_frames()
     }

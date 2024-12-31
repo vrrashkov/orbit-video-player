@@ -2159,6 +2159,8 @@ name = "nebula-core"
 version = "0.1.0"
 dependencies = [
  "ffmpeg-next",
+ "iced",
+ "iced_wgpu",
  "nebula-common",
  "tracing",
  "wgpu 23.0.1",
@@ -2171,6 +2173,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "iced",
+ "iced_wgpu",
+ "nebula-core",
+ "tracing",
 ]
 
 [[package]]
