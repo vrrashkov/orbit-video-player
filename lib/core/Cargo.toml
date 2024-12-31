@@ -1,0 +1,12 @@
+[package]
+name = "nebula-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wgpu.workspace = true
+ffmpeg-next.workspace = true
+winit.workspace = true
+tracing.workspace = true
+# Local
+nebula-common.workspace = true
