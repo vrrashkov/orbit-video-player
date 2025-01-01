@@ -148,14 +148,14 @@ where
 
         let drawing_bounds = iced::Rectangle::new(position, final_size);
 
-        // Update and render video frame
-        if let Err(e) = self.video.render() {
-            tracing::error!("Failed to render video frame: {:?}", e);
-        }
+        // // Update and render video frame
+        // if let Err(e) = self.video.render() {
+        //     tracing::error!("Failed to render video frame: {:?}", e);
+        // }
 
         // Draw using your VideoRenderer's primitive
         let render = |renderer: &mut Renderer| {
-            renderer.draw_primitive(drawing_bounds, self.video.renderer);
+            renderer.draw_primitive(drawing_bounds, self.video.primitive.clone());
         };
 
         if adjusted_fit.width > bounds.width || adjusted_fit.height > bounds.height {

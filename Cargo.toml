@@ -9,6 +9,8 @@ members = [ "lib/common", "lib/core","lib/ui"]
 [dependencies]
 anyhow.workspace = true
 iced.workspace = true
+# LOCAL
+nebula-ui.workspace = true
 
 [workspace.dependencies]
 anyhow = "1.0"

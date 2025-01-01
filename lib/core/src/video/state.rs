@@ -7,6 +7,8 @@ use super::{decoder::VideoDecoder, primitive::VideoPrimitive, renderer::VideoRen
 pub struct VideoState {
     pub window: Arc<Window>,
     pub decoder: VideoDecoder,
+    pub primitive: VideoPrimitive,
+    // pub renderer: VideoRenderer,
     pub is_playing: bool,
 }
 impl VideoState {
@@ -17,12 +19,15 @@ impl VideoState {
         end_frame: u32,
     ) -> Result<Self, VideoError> {
         let video_decoder = VideoDecoder::new(video_path, start_frame, end_frame).await?;
-        let renderer = VideoPrimitive::new(
-            inner.id,
-            Arc::clone(&inner.alive),
-            Arc::clone(&inner.frame),
-            (inner.width as _, inner.height as _),
-            upload_frame,
+        let primitive = VideoPrimitive::new(
+            window.id().into(),
+            // Arc::clone(&inner.alive),
+            // Arc::clone(&inner.frame),
+            (
+                video_decoder.decoder.width() as _,
+                video_decoder.decoder.height() as _,
+            ),
+            // upload_frame,
         );
         // let renderer = VideoRenderer::new(
         //     window.clone(),
@@ -34,25 +39,26 @@ impl VideoState {
         Ok(Self {
             window,
             decoder: video_decoder,
-            renderer,
+            primitive,
+            // renderer,
             is_playing: false,
         })
     }
 
-    pub fn render(&mut self) -> Result<(), VideoError> {
-        if let Some(frame_data) = self.decoder.next_frame()? {
-            self.renderer.update_texture(
-                &frame_data,
-                self.decoder.width(),
-                self.decoder.height(),
-            )?;
-        }
-        self.renderer.render()
-    }
+    // pub fn render(&mut self) -> Result<(), VideoError> {
+    //     if let Some(frame_data) = self.decoder.next_frame()? {
+    //         self.renderer.update_texture(
+    //             &frame_data,
+    //             self.decoder.width(),
+    //             self.decoder.height(),
+    //         )?;
+    //     }
+    //     self.renderer.render()
+    // }
 
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) -> Result<(), VideoError> {
-        self.renderer.resize(new_size)
-    }
+    // pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) -> Result<(), VideoError> {
+    //     self.renderer.resize(new_size)
+    // }
 
     // Control methods
     pub fn play(&mut self) {

@@ -381,28 +381,28 @@ impl VideoPipeline {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct VideoPrimitive {
+pub struct VideoPrimitive {
     video_id: u64,
-    alive: Arc<AtomicBool>,
-    frame: Arc<Mutex<Vec<u8>>>,
+    // alive: Arc<AtomicBool>,
+    // frame: Arc<Mutex<Vec<u8>>>,
     size: (u32, u32),
-    upload_frame: bool,
+    // upload_frame: bool,
 }
 
 impl VideoPrimitive {
     pub fn new(
         video_id: u64,
-        alive: Arc<AtomicBool>,
-        frame: Arc<Mutex<Vec<u8>>>,
+        // alive: Arc<AtomicBool>,
+        // frame: Arc<Mutex<Vec<u8>>>,
         size: (u32, u32),
-        upload_frame: bool,
+        // upload_frame: bool,
     ) -> Self {
         VideoPrimitive {
             video_id,
-            alive,
-            frame,
+            // alive,
+            // frame,
             size,
-            upload_frame,
+            // upload_frame,
         }
     }
 }
@@ -423,16 +423,16 @@ impl Primitive for VideoPrimitive {
 
         let pipeline = storage.get_mut::<VideoPipeline>().unwrap();
 
-        if self.upload_frame {
-            pipeline.upload(
-                device,
-                queue,
-                self.video_id,
-                &self.alive,
-                self.size,
-                self.frame.lock().expect("lock frame mutex").as_slice(),
-            );
-        }
+        // if self.upload_frame {
+        //     pipeline.upload(
+        //         device,
+        //         queue,
+        //         self.video_id,
+        //         &self.alive,
+        //         self.size,
+        //         self.frame.lock().expect("lock frame mutex").as_slice(),
+        //     );
+        // }
 
         pipeline.prepare(
             queue,
