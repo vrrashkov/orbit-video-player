@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 thiserror.workspace = true
 wgpu.workspace = true
+iced.workspace = true
+anyhow.workspace = true

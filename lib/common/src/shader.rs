@@ -1,1 +1,1 @@
-pub const VIDEO: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../assets/shaders/video.wgsl");
+pub const VIDEO: &str = concat!("/Users/vrashkov/Projects/MIR/nebula/assets/shaders/shader.wgsl");

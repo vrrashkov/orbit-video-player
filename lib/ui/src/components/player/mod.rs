@@ -4,13 +4,13 @@ use iced::{
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use nebula_core::video::state::VideoState;
-use std::{marker::PhantomData, time::Duration, time::Instant}; // Your video implementation
+use std::{marker::PhantomData, time::Duration, time::Instant};
 
 pub struct VideoPlayer<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
     Renderer: PrimitiveRenderer,
 {
-    video: &'a mut VideoState,
+    video: &'a VideoState,
     content_fit: iced::ContentFit,
     width: iced::Length,
     height: iced::Length,
@@ -23,7 +23,7 @@ impl<'a, Message, Theme, Renderer> VideoPlayer<'a, Message, Theme, Renderer>
 where
     Renderer: PrimitiveRenderer,
 {
-    pub fn new(video: &'a mut VideoState) -> Self {
+    pub fn new(video: &'a VideoState) -> Self {
         VideoPlayer {
             video,
             content_fit: iced::ContentFit::default(),
@@ -182,15 +182,6 @@ where
                 if self.video.current_frame() >= self.video.end_frame() {
                     if let Some(ref message) = self.on_end_of_frame {
                         shell.publish(message.clone());
-                    }
-
-                    if self.video.looping() {
-                        if let Err(e) = self.video.seek(self.video.start_frame()) {
-                            tracing::error!("Failed to seek to start: {:?}", e);
-                        }
-                    } else {
-                        // TODO
-                        // self.video.set_playing(false);
                     }
                 }
 

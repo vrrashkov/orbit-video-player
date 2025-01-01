@@ -2,6 +2,12 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum VideoError {
+    #[error("Iced error: {0}")]
+    Iced(#[from] iced::Error),
+
+    #[error("Anyhow error: {0}")]
+    Anyhow(#[from] anyhow::Error),
+
     #[error("FFmpeg error: {0}")]
     FFmpeg(String),
 

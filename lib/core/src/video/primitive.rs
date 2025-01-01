@@ -39,7 +39,9 @@ impl VideoPipeline {
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("iced_video_player shader"),
-            source: wgpu::ShaderSource::Wgsl(shader::VIDEO.into()),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../../../assets/shaders/video.wgsl").into(),
+            ),
         });
 
         let bg0_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

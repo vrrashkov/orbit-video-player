@@ -14,11 +14,7 @@ pub struct VideoDecoder {
 }
 
 impl VideoDecoder {
-    pub async fn new(
-        video_path: &str,
-        start_frame: u32,
-        end_frame: u32,
-    ) -> Result<Self, VideoError> {
+    pub fn new(video_path: &str, start_frame: u32, end_frame: u32) -> Result<Self, VideoError> {
         // 3. Initialize FFmpeg
         ffmpeg::init()
             .map_err(|e| VideoError::FFmpeg(format!("Failed to initialize FFmpeg: {}", e)))?;

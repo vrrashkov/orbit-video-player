@@ -1,23 +1,129 @@
+use ffmpeg_next as ffmpeg;
+use iced::{
+    widget::{Button, Column, Container, Row, Slider, Text},
+    Element,
+};
+use iced::{Renderer, Settings};
+use nebula_common::VideoError;
+use nebula_core::video::state::VideoState;
 use nebula_ui::components::player::VideoPlayer;
+use std::time::Duration;
+use std::{path::Path, sync::Arc};
+use winit::{event_loop::EventLoop, window::WindowBuilder};
 
 fn main() -> iced::Result {
-    iced::run("Video Player", (), App::view)
+    iced::run("Iced Video Player", App::update, App::view)
 }
 
+#[derive(Clone, Debug)]
+enum Message {
+    TogglePause,
+    ToggleLoop,
+    Seek(f64),
+    SeekRelease,
+    EndOfStream,
+    NewFrame,
+}
 struct App {
-    video: Video,
+    video: VideoState,
+    position: f64,
+    dragging: bool,
 }
 
 impl Default for App {
     fn default() -> Self {
+        // let event_loop = EventLoop::new().unwrap();
+        // let window = WindowBuilder::new()
+        //     .with_title("Video Processing")
+        //     .with_inner_size(winit::dpi::PhysicalSize::new(800, 600))
+        //     .build(&event_loop)
+        //     .unwrap();
+        // let window = Arc::new(window);
+
+        let video_path = "assets/videos/video1.mp4";
+        if !Path::new(video_path).exists() {
+            panic!("Video file not found at: {}", video_path);
+        }
+        let start_frame = 430;
+        let end_frame = 435;
+        let state = VideoState::new(1, video_path, start_frame, end_frame);
+
         App {
-            video: Video::new(&url::Url::parse("file:///C:/my_video.mp4").unwrap()).unwrap(),
+            video: state.unwrap(),
+            position: 0.0,
+            dragging: false,
         }
     }
 }
 
 impl App {
-    fn view(&self) -> iced::Element<()> {
-        VideoPlayer::new(&mut &self.video).into()
+    fn update(&mut self, message: Message) {
+        match message {
+            _ => {
+                tracing::debug!("Test ");
+            }
+        }
+    }
+
+    fn view(&self) -> Element<Message> {
+        let is_playing = self.video.is_playing;
+        let total_frames = self.video.total_frames();
+        let is_looping = self.video.looping();
+
+        Column::new()
+            .push(
+                Container::new(
+                    VideoPlayer::new(&self.video)
+                        .width(iced::Length::Fill)
+                        .height(iced::Length::Fill)
+                        .content_fit(iced::ContentFit::Contain)
+                        // .on_end_of_stream(Message::EndOfStream)
+                        .on_new_frame(Message::NewFrame),
+                )
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center)
+                .width(iced::Length::Fill)
+                .height(iced::Length::Fill),
+            )
+            .push(
+                Container::new(
+                    Slider::new(0.0..=total_frames as f64, self.position, Message::Seek)
+                        .step(0.1)
+                        .on_release(Message::SeekRelease),
+                )
+                .padding(iced::Padding::new(5.0).left(10.0).right(10.0)),
+            )
+            .push(
+                Row::new()
+                    .spacing(5)
+                    .align_y(iced::alignment::Vertical::Center)
+                    .padding(iced::Padding::new(10.0).top(0.0))
+                    .push(
+                        Button::new(Text::new(if !is_playing { "Play" } else { "Pause" }))
+                            .width(80.0)
+                            .on_press(Message::TogglePause),
+                    )
+                    .push(
+                        Button::new(Text::new(if is_looping {
+                            "Disable Loop"
+                        } else {
+                            "Enable Loop"
+                        }))
+                        .width(120.0)
+                        .on_press(Message::ToggleLoop),
+                    )
+                    .push(
+                        Text::new(format!(
+                            "{}:{:02}s",
+                            self.position as u64 / 60,
+                            self.position as u64 % 60,
+                            // self.video.total_frames().as_secs() / 60,
+                            // self.video.total_frames().as_secs() % 60,
+                        ))
+                        .width(iced::Length::Fill)
+                        .align_x(iced::alignment::Horizontal::Right),
+                    ),
+            )
+            .into()
     }
 }

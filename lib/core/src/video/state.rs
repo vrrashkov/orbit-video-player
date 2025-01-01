@@ -5,22 +5,23 @@ use winit::window::Window;
 use super::{decoder::VideoDecoder, primitive::VideoPrimitive, renderer::VideoRenderer};
 
 pub struct VideoState {
-    pub window: Arc<Window>,
+    // pub window: Arc<Window>,
     pub decoder: VideoDecoder,
     pub primitive: VideoPrimitive,
     // pub renderer: VideoRenderer,
     pub is_playing: bool,
 }
 impl VideoState {
-    pub async fn new(
-        window: Arc<Window>,
+    pub fn new(
+        id: u64,
         video_path: &str,
         start_frame: u32,
         end_frame: u32,
     ) -> Result<Self, VideoError> {
-        let video_decoder = VideoDecoder::new(video_path, start_frame, end_frame).await?;
+        let video_decoder = VideoDecoder::new(video_path, start_frame, end_frame)?;
         let primitive = VideoPrimitive::new(
-            window.id().into(),
+            id,
+            // window.id().into(),
             // Arc::clone(&inner.alive),
             // Arc::clone(&inner.frame),
             (
@@ -37,7 +38,7 @@ impl VideoState {
         // .await?;
 
         Ok(Self {
-            window,
+            // window,
             decoder: video_decoder,
             primitive,
             // renderer,
