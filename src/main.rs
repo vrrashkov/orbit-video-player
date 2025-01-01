@@ -7,7 +7,7 @@ use iced::{Renderer, Settings};
 use nebula_common::VideoError;
 use nebula_core::video::state::VideoState;
 use nebula_ui::components::player::VideoPlayer;
-use std::time::Duration;
+use std::{cell::RefCell, time::Duration};
 use std::{path::Path, sync::Arc};
 use winit::{event_loop::EventLoop, window::WindowBuilder};
 
@@ -25,31 +25,23 @@ enum Message {
     NewFrame,
 }
 struct App {
-    video: VideoState,
+    video: RefCell<VideoState>,
     position: f64,
     dragging: bool,
 }
 
 impl Default for App {
     fn default() -> Self {
-        // let event_loop = EventLoop::new().unwrap();
-        // let window = WindowBuilder::new()
-        //     .with_title("Video Processing")
-        //     .with_inner_size(winit::dpi::PhysicalSize::new(800, 600))
-        //     .build(&event_loop)
-        //     .unwrap();
-        // let window = Arc::new(window);
-
         let video_path = "assets/videos/video1.mp4";
         if !Path::new(video_path).exists() {
             panic!("Video file not found at: {}", video_path);
         }
-        let start_frame = 430;
+        let start_frame = 1;
         let end_frame = 435;
-        let state = VideoState::new(1, video_path, start_frame, end_frame);
+        let state = RefCell::new(VideoState::new(1, video_path, start_frame, end_frame).unwrap());
 
         App {
-            video: state.unwrap(),
+            video: state,
             position: 0.0,
             dragging: false,
         }
@@ -59,16 +51,29 @@ impl Default for App {
 impl App {
     fn update(&mut self, message: Message) {
         match message {
-            _ => {
-                tracing::debug!("Test ");
+            Message::TogglePause => {
+                if !self.video.borrow().is_playing {
+                    self.video.borrow_mut().play();
+                } else {
+                    self.video.borrow_mut().pause();
+                }
+            }
+            Message::ToggleLoop => {}
+            Message::Seek(_) => {}
+            Message::SeekRelease => {}
+            Message::EndOfStream => {}
+            Message::NewFrame => {
+                if !self.dragging {
+                    self.position = self.video.borrow().current_frame() as f64;
+                }
             }
         }
     }
 
     fn view(&self) -> Element<Message> {
-        let is_playing = self.video.is_playing;
-        let total_frames = self.video.total_frames();
-        let is_looping = self.video.looping();
+        let is_playing = self.video.borrow().is_playing;
+        let total_frames = self.video.borrow().total_frames();
+        let is_looping = self.video.borrow().looping();
 
         Column::new()
             .push(

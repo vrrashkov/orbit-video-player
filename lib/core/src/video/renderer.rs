@@ -210,6 +210,7 @@ impl VideoRenderer {
 
         Ok(())
     }
+
     // In VideoRenderer
     pub fn update_texture(
         &mut self,

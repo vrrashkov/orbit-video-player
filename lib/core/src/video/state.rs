@@ -7,7 +7,7 @@ use super::{decoder::VideoDecoder, primitive::VideoPrimitive, renderer::VideoRen
 pub struct VideoState {
     // pub window: Arc<Window>,
     pub decoder: VideoDecoder,
-    pub primitive: VideoPrimitive,
+    // pub primitive: VideoPrimitive,
     // pub renderer: VideoRenderer,
     pub is_playing: bool,
 }
@@ -19,28 +19,22 @@ impl VideoState {
         end_frame: u32,
     ) -> Result<Self, VideoError> {
         let video_decoder = VideoDecoder::new(video_path, start_frame, end_frame)?;
-        let primitive = VideoPrimitive::new(
-            id,
-            // window.id().into(),
-            // Arc::clone(&inner.alive),
-            // Arc::clone(&inner.frame),
-            (
-                video_decoder.decoder.width() as _,
-                video_decoder.decoder.height() as _,
-            ),
-            // upload_frame,
-        );
-        // let renderer = VideoRenderer::new(
-        //     window.clone(),
-        //     video_decoder.decoder.width(),
-        //     video_decoder.decoder.height(),
-        // )
-        // .await?;
+        // let primitive = VideoPrimitive::new(
+        //     id,
+        //     // window.id().into(),
+        //     // Arc::clone(&inner.alive),
+        //     // Arc::clone(&inner.frame),
+        //     (
+        //         video_decoder.decoder.width() as _,
+        //         video_decoder.decoder.height() as _,
+        //     ),
+        //     // upload_frame,
+        // );
 
         Ok(Self {
             // window,
             decoder: video_decoder,
-            primitive,
+            // primitive,
             // renderer,
             is_playing: false,
         })

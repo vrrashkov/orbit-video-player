@@ -3,14 +3,19 @@ use iced::{
     Element,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
-use nebula_core::video::state::VideoState;
-use std::{marker::PhantomData, time::Duration, time::Instant};
+use nebula_core::video::{primitive::VideoPrimitive, state::VideoState};
+use std::{
+    cell::RefCell,
+    marker::PhantomData,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 pub struct VideoPlayer<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
     Renderer: PrimitiveRenderer,
 {
-    video: &'a VideoState,
+    video: &'a RefCell<VideoState>,
     content_fit: iced::ContentFit,
     width: iced::Length,
     height: iced::Length,
@@ -23,7 +28,7 @@ impl<'a, Message, Theme, Renderer> VideoPlayer<'a, Message, Theme, Renderer>
 where
     Renderer: PrimitiveRenderer,
 {
-    pub fn new(video: &'a VideoState) -> Self {
+    pub fn new(video: &'a RefCell<VideoState>) -> Self {
         VideoPlayer {
             video,
             content_fit: iced::ContentFit::default(),
@@ -91,8 +96,8 @@ where
         limits: &layout::Limits,
     ) -> layout::Node {
         let (video_width, video_height) = (
-            self.video.decoder.width() as f32,
-            self.video.decoder.height() as f32,
+            self.video.borrow().decoder.width() as f32,
+            self.video.borrow().decoder.height() as f32,
         );
 
         let image_size = iced::Size::new(video_width, video_height);
@@ -124,8 +129,8 @@ where
     ) {
         let bounds = layout.bounds();
         let image_size = iced::Size::new(
-            self.video.decoder.width() as f32,
-            self.video.decoder.height() as f32,
+            self.video.borrow().decoder.width() as f32,
+            self.video.borrow().decoder.height() as f32,
         );
 
         let adjusted_fit = self.content_fit.fit(image_size, bounds.size());
@@ -153,15 +158,30 @@ where
         //     tracing::error!("Failed to render video frame: {:?}", e);
         // }
 
-        // Draw using your VideoRenderer's primitive
-        let render = |renderer: &mut Renderer| {
-            renderer.draw_primitive(drawing_bounds, self.video.primitive.clone());
-        };
+        match self.video.borrow_mut().decoder.next_frame() {
+            Ok(frame) => {
+                if let Some(frame_data) = frame {
+                    let primitive = VideoPrimitive::new(
+                        1,
+                        true,
+                        frame_data,
+                        (image_size.width as _, image_size.height as _),
+                        true,
+                    );
 
-        if adjusted_fit.width > bounds.width || adjusted_fit.height > bounds.height {
-            renderer.with_layer(bounds, render);
-        } else {
-            render(renderer);
+                    let render = |renderer: &mut Renderer| {
+                        renderer.draw_primitive(drawing_bounds, primitive.clone());
+                    };
+
+                    if adjusted_fit.width > bounds.width || adjusted_fit.height > bounds.height {
+                        renderer.with_layer(bounds, render);
+                    } else {
+                        render(renderer);
+                    }
+                    dbg!("11111");
+                }
+            }
+            Err(_) => {}
         }
     }
 
@@ -177,9 +197,9 @@ where
         _viewport: &iced::Rectangle,
     ) -> Status {
         if let iced::Event::Window(iced::window::Event::RedrawRequested(_)) = event {
-            if self.video.is_playing() {
+            if self.video.borrow().is_playing() {
                 // Check if we've reached the end
-                if self.video.current_frame() >= self.video.end_frame() {
+                if self.video.borrow().current_frame() >= self.video.borrow().end_frame() {
                     if let Some(ref message) = self.on_end_of_frame {
                         shell.publish(message.clone());
                     }
