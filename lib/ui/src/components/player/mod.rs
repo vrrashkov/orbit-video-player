@@ -5,6 +5,7 @@ use iced::{
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use nebula_core::video::{primitive::VideoPrimitive, state::VideoState};
 use std::{
+    borrow::{Borrow, BorrowMut},
     cell::RefCell,
     marker::PhantomData,
     sync::Arc,
@@ -127,11 +128,10 @@ where
         _cursor: advanced::mouse::Cursor,
         _viewport: &iced::Rectangle,
     ) {
+        let mut video = self.video.borrow_mut();
         let bounds = layout.bounds();
-        let image_size = iced::Size::new(
-            self.video.borrow().decoder.width() as f32,
-            self.video.borrow().decoder.height() as f32,
-        );
+        let image_size =
+            iced::Size::new(video.decoder.width() as f32, video.decoder.height() as f32);
 
         let adjusted_fit = self.content_fit.fit(image_size, bounds.size());
         let scale = iced::Vector::new(
@@ -152,36 +152,48 @@ where
         };
 
         let drawing_bounds = iced::Rectangle::new(position, final_size);
+        if video.is_playing() {
+            tracing::info!("Video playing, requesting frame");
+            if let Ok(Some(frame_data)) = video.update() {
+                // Call update() here
+                tracing::info!("Got frame data at frame {}", video.current_frame());
+                let primitive = VideoPrimitive::new(
+                    1,
+                    true,
+                    frame_data,
+                    (image_size.width as _, image_size.height as _),
+                    true,
+                );
 
-        // // Update and render video frame
-        // if let Err(e) = self.video.render() {
-        //     tracing::error!("Failed to render video frame: {:?}", e);
-        // }
+                let render = |renderer: &mut Renderer| {
+                    renderer.draw_primitive(drawing_bounds, primitive.clone());
+                };
 
-        match self.video.borrow_mut().decoder.next_frame() {
-            Ok(frame) => {
-                if let Some(frame_data) = frame {
-                    let primitive = VideoPrimitive::new(
-                        1,
-                        true,
-                        frame_data,
-                        (image_size.width as _, image_size.height as _),
-                        true,
-                    );
-
-                    let render = |renderer: &mut Renderer| {
-                        renderer.draw_primitive(drawing_bounds, primitive.clone());
-                    };
-
-                    if adjusted_fit.width > bounds.width || adjusted_fit.height > bounds.height {
-                        renderer.with_layer(bounds, render);
-                    } else {
-                        render(renderer);
-                    }
-                    dbg!("11111");
+                if adjusted_fit.width > bounds.width || adjusted_fit.height > bounds.height {
+                    renderer.with_layer(bounds, render);
+                } else {
+                    render(renderer);
                 }
             }
-            Err(_) => {}
+        } else if let Some(last_frame) = video.decoder.get_last_frame() {
+            // Render the last frame if we're not getting a new one
+            let primitive = VideoPrimitive::new(
+                1,
+                true,
+                last_frame,
+                (image_size.width as _, image_size.height as _),
+                false, // Don't re-upload the texture
+            );
+
+            let render = |renderer: &mut Renderer| {
+                renderer.draw_primitive(drawing_bounds, primitive.clone());
+            };
+
+            if adjusted_fit.width > bounds.width || adjusted_fit.height > bounds.height {
+                renderer.with_layer(bounds, render);
+            } else {
+                render(renderer);
+            }
         }
     }
 
@@ -197,19 +209,31 @@ where
         _viewport: &iced::Rectangle,
     ) -> Status {
         if let iced::Event::Window(iced::window::Event::RedrawRequested(_)) = event {
-            if self.video.borrow().is_playing() {
-                // Check if we've reached the end
-                if self.video.borrow().current_frame() >= self.video.borrow().end_frame() {
+            let mut video = self.video.borrow_mut();
+
+            if video.is_playing() {
+                // Get the video's frame duration
+                let frame_duration = video.get_frame_duration();
+                shell.request_redraw(iced::window::RedrawRequest::NextFrame);
+
+                // Only publish new frame message if we actually got a new frame
+                // if video.decoder.should_process_frame() {
+                //     if let Some(ref message) = self.on_new_frame {
+                //         shell.publish(message.clone());
+                //     }
+                // }
+
+                // Check for end of video
+                if video.current_frame() >= video.end_frame() {
                     if let Some(ref message) = self.on_end_of_frame {
                         shell.publish(message.clone());
                     }
                 }
 
-                if let Some(ref message) = self.on_new_frame {
-                    shell.publish(message.clone());
-                }
-
-                shell.request_redraw(iced::window::RedrawRequest::NextFrame);
+                // Only schedule one redraw
+                shell.request_redraw(iced::window::RedrawRequest::At(
+                    Instant::now() + frame_duration,
+                ));
             } else {
                 shell.request_redraw(iced::window::RedrawRequest::At(
                     Instant::now() + Duration::from_millis(32),

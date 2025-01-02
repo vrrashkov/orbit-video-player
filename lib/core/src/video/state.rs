@@ -1,14 +1,11 @@
 use nebula_common::VideoError;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use winit::window::Window;
 
-use super::{decoder::VideoDecoder, primitive::VideoPrimitive, renderer::VideoRenderer};
+use super::{decoder::VideoDecoder, primitive::VideoPrimitive};
 
 pub struct VideoState {
-    // pub window: Arc<Window>,
     pub decoder: VideoDecoder,
-    // pub primitive: VideoPrimitive,
-    // pub renderer: VideoRenderer,
     pub is_playing: bool,
 }
 impl VideoState {
@@ -19,41 +16,19 @@ impl VideoState {
         end_frame: u32,
     ) -> Result<Self, VideoError> {
         let video_decoder = VideoDecoder::new(video_path, start_frame, end_frame)?;
-        // let primitive = VideoPrimitive::new(
-        //     id,
-        //     // window.id().into(),
-        //     // Arc::clone(&inner.alive),
-        //     // Arc::clone(&inner.frame),
-        //     (
-        //         video_decoder.decoder.width() as _,
-        //         video_decoder.decoder.height() as _,
-        //     ),
-        //     // upload_frame,
-        // );
 
         Ok(Self {
-            // window,
             decoder: video_decoder,
-            // primitive,
-            // renderer,
             is_playing: false,
         })
     }
-
-    // pub fn render(&mut self) -> Result<(), VideoError> {
-    //     if let Some(frame_data) = self.decoder.next_frame()? {
-    //         self.renderer.update_texture(
-    //             &frame_data,
-    //             self.decoder.width(),
-    //             self.decoder.height(),
-    //         )?;
-    //     }
-    //     self.renderer.render()
-    // }
-
-    // pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) -> Result<(), VideoError> {
-    //     self.renderer.resize(new_size)
-    // }
+    pub fn update(&mut self) -> Result<Option<Vec<u8>>, VideoError> {
+        if self.is_playing {
+            self.decoder.next_frame()
+        } else {
+            Ok(self.decoder.get_last_frame())
+        }
+    }
 
     // Control methods
     pub fn play(&mut self) {
@@ -84,7 +59,11 @@ impl VideoState {
     pub fn total_frames(&self) -> u32 {
         self.decoder.total_frames()
     }
-
+    pub fn get_frame_duration(&self) -> Duration {
+        // Return the frame duration based on your video's FPS
+        let fps = self.decoder.get_fps();
+        Duration::from_secs_f64(1.0 / fps)
+    }
     pub fn is_playing(&self) -> bool {
         self.is_playing
     }

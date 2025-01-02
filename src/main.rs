@@ -9,9 +9,17 @@ use nebula_core::video::state::VideoState;
 use nebula_ui::components::player::VideoPlayer;
 use std::{cell::RefCell, time::Duration};
 use std::{path::Path, sync::Arc};
+use tracing::{info, Level};
+use tracing_subscriber::FmtSubscriber;
 use winit::{event_loop::EventLoop, window::WindowBuilder};
 
 fn main() -> iced::Result {
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::DEBUG)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
     iced::run("Iced Video Player", App::update, App::view)
 }
 
@@ -64,7 +72,9 @@ impl App {
             Message::EndOfStream => {}
             Message::NewFrame => {
                 if !self.dragging {
-                    self.position = self.video.borrow().current_frame() as f64;
+                    let current = self.video.borrow().current_frame();
+                    tracing::info!("Current frame: {}", current);
+                    self.position = current as f64;
                 }
             }
         }

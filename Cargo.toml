@@ -13,6 +13,7 @@ ffmpeg-next.workspace = true
 winit.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 # LOCAL
 nebula-common.workspace = true
 nebula-ui.workspace = true
