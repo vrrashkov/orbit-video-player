@@ -222,7 +222,9 @@ where
                 //         shell.publish(message.clone());
                 //     }
                 // }
-
+                if let Some(ref message) = self.on_new_frame {
+                    shell.publish(message.clone());
+                }
                 // Check for end of video
                 if video.current_frame() >= video.end_frame() {
                     if let Some(ref message) = self.on_end_of_frame {
