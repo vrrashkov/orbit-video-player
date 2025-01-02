@@ -1,32 +1,25 @@
 use ffmpeg_next::{self as ffmpeg, error::EAGAIN};
 use nebula_common::VideoError;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::{
     collections::VecDeque,
     time::{Duration, Instant},
 };
-pub struct VideoDecoder {
+pub struct VideoStream {
     pub decoder: ffmpeg::decoder::Video,
     format_context: ffmpeg::format::context::Input,
-    front_buffer: Option<Vec<u8>>,
-    back_buffer: Option<Vec<u8>>,
     video_stream_index: usize,
-    last_frame_time: Instant,
-    frame_duration: Duration,
-    accumulated_time: Duration,
     current_frame: u32,
     start_frame: u32,
     end_frame: u32,
     looping: bool,
     frame_buffer: Vec<Vec<u8>>,
-    max_buffer_size: usize,
     presentation_queue: VecDeque<Vec<u8>>,
     max_queue_size: usize, // e.g., 5-10 frames
     frame_timer: Instant,
     pub is_playing: bool,
 }
 
-impl VideoDecoder {
+impl VideoStream {
     pub fn new(video_path: &str, start_frame: u32, end_frame: u32) -> Result<Self, VideoError> {
         // 3. Initialize FFmpeg
         ffmpeg::init()
@@ -67,41 +60,23 @@ impl VideoDecoder {
             .decoder()
             .video()
             .map_err(|e| VideoError::FFmpeg(format!("Failed to create video decoder: {}", e)))?;
-        // let (decode_tx, decode_rx) = channel();
-        // let (frame_tx, frame_rx) = channel();
-
-        // // Start decode thread
-        // std::thread::spawn(move || {
-        //     while let Ok(()) = decode_rx.recv() {
-        //         if let Ok(Some(frame)) = self.decode_next_frame() {
-        //             let _ = frame_tx.send(frame);
-        //         }
-        //     }
-        // });
 
         let now = Instant::now();
         let mut decoder = Self {
             decoder,
             format_context,
             video_stream_index,
-            frame_duration,
-            last_frame_time: now,
             current_frame: start_frame,
             frame_timer: now,
             start_frame,
             end_frame,
-            front_buffer: None,
-            back_buffer: None,
-            accumulated_time: Duration::ZERO,
             looping: false,
             frame_buffer: Vec::new(),
             presentation_queue: VecDeque::new(),
             max_queue_size: 10,
-            max_buffer_size: 5, // Adjust this value as needed
             is_playing: false,
         };
 
-        // Pre-buffer frames
         decoder.pre_buffer()?;
 
         Ok(decoder)
@@ -169,13 +144,6 @@ impl VideoDecoder {
         if self.presentation_queue.len() >= self.max_queue_size {
             return Ok(None);
         }
-
-        // if self.current_frame < self.start_frame {
-        //     self.skip_frame()?;
-        //     self.current_frame += 1;
-        //     return Ok(None);
-        // }
-
         if self.current_frame > self.end_frame {
             return Ok(None);
         }
@@ -359,7 +327,7 @@ impl VideoDecoder {
         Duration::from_secs_f64(1.0 / fps)
     }
 }
-impl Drop for VideoDecoder {
+impl Drop for VideoStream {
     fn drop(&mut self) {
         let _ = self.decoder.send_packet(&ffmpeg::Packet::empty());
     }

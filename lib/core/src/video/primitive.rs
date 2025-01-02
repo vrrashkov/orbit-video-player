@@ -1,10 +1,5 @@
-use iced::Rectangle;
-use iced_wgpu::graphics::Viewport;
 use iced_wgpu::primitive::Primitive;
-use iced_wgpu::primitive::Storage;
 use iced_wgpu::wgpu;
-use nebula_common::shader;
-use std::sync::{Arc, Mutex};
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     num::NonZero,

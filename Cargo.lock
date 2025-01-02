@@ -2234,6 +2234,7 @@ dependencies = [
  "iced_wgpu",
  "nebula-core",
  "tracing",
+ "winit 0.29.15",
 ]
 
 [[package]]

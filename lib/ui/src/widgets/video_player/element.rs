@@ -3,82 +3,128 @@ use iced::{
     Element,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
-use nebula_core::video::{decoder::VideoDecoder, primitive::VideoPrimitive};
+use nebula_core::video::{primitive::VideoPrimitive, stream::VideoStream};
 use std::{
-    borrow::{Borrow, BorrowMut},
     cell::RefCell,
-    marker::PhantomData,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
-pub struct VideoPlayer<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
-where
-    Renderer: PrimitiveRenderer,
-{
-    video: &'a RefCell<VideoDecoder>,
-    content_fit: iced::ContentFit,
-    width: iced::Length,
-    height: iced::Length,
-    on_end_of_frame: Option<Message>,
-    on_new_frame: Option<Message>,
-    _phantom: PhantomData<(Theme, Renderer)>,
+use iced::widget::{Button, Column, Container, Row, Slider, Text};
+
+use super::Video;
+
+pub struct Player {
+    stream: RefCell<VideoStream>,
+    position: f64,
+    dragging: bool,
 }
 
-impl<'a, Message, Theme, Renderer> VideoPlayer<'a, Message, Theme, Renderer>
-where
-    Renderer: PrimitiveRenderer,
-{
-    pub fn new(video: &'a RefCell<VideoDecoder>) -> Self {
-        VideoPlayer {
-            video,
-            content_fit: iced::ContentFit::default(),
-            width: iced::Length::Shrink,
-            height: iced::Length::Shrink,
-            on_end_of_frame: None,
-            on_new_frame: None,
-            _phantom: Default::default(),
+#[derive(Clone, Debug)]
+pub enum Event {
+    Pause,
+    Loop,
+    Seek(f64),
+    SeekRelease,
+    EndOfStream,
+    NewFrame,
+}
+
+impl Player {
+    pub fn new(stream: RefCell<VideoStream>, position: f64, dragging: bool) -> Self {
+        Self {
+            stream,
+            position,
+            dragging,
+        }
+    }
+    pub fn update(&mut self, message: Event) {
+        match message {
+            Event::Pause => {
+                if !self.stream.borrow().is_playing {
+                    self.stream.borrow_mut().play();
+                } else {
+                    self.stream.borrow_mut().pause();
+                }
+            }
+            Event::Loop => {}
+            Event::Seek(_) => {}
+            Event::SeekRelease => {}
+            Event::EndOfStream => {}
+            Event::NewFrame => {
+                if !self.dragging {
+                    let current = self.stream.borrow().current_frame();
+                    tracing::info!("Current frame: {}", current);
+                    self.position = current as f64;
+                }
+            }
         }
     }
 
-    pub fn width(self, width: impl Into<iced::Length>) -> Self {
-        VideoPlayer {
-            width: width.into(),
-            ..self
-        }
-    }
+    pub fn view(&self) -> Element<Event> {
+        let is_playing = self.stream.borrow().is_playing;
+        let total_frames = self.stream.borrow().total_frames();
+        let is_looping = self.stream.borrow().looping();
 
-    pub fn height(self, height: impl Into<iced::Length>) -> Self {
-        VideoPlayer {
-            height: height.into(),
-            ..self
-        }
-    }
-
-    pub fn content_fit(self, content_fit: iced::ContentFit) -> Self {
-        VideoPlayer {
-            content_fit,
-            ..self
-        }
-    }
-
-    pub fn on_end_of_frame(self, message: Message) -> Self {
-        VideoPlayer {
-            on_end_of_frame: Some(message),
-            ..self
-        }
-    }
-
-    pub fn on_new_frame(self, message: Message) -> Self {
-        VideoPlayer {
-            on_new_frame: Some(message),
-            ..self
-        }
+        Column::new()
+            .push(
+                Container::new(
+                    Video::new(&self.stream)
+                        .width(iced::Length::Fill)
+                        .height(iced::Length::Fill)
+                        .content_fit(iced::ContentFit::Contain)
+                        // .on_end_of_stream(Message::EndOfStream)
+                        .on_new_frame(Event::NewFrame),
+                )
+                .align_x(iced::Alignment::Center)
+                .align_y(iced::Alignment::Center)
+                .width(iced::Length::Fill)
+                .height(iced::Length::Fill),
+            )
+            .push(
+                Container::new(
+                    Slider::new(0.0..=total_frames as f64, self.position, Event::Seek)
+                        .step(0.1)
+                        .on_release(Event::SeekRelease),
+                )
+                .padding(iced::Padding::new(5.0).left(10.0).right(10.0)),
+            )
+            .push(
+                Row::new()
+                    .spacing(5)
+                    .align_y(iced::alignment::Vertical::Center)
+                    .padding(iced::Padding::new(10.0).top(0.0))
+                    .push(
+                        Button::new(Text::new(if !is_playing { "Play" } else { "Pause" }))
+                            .width(80.0)
+                            .on_press(Event::Pause),
+                    )
+                    .push(
+                        Button::new(Text::new(if is_looping {
+                            "Disable Loop"
+                        } else {
+                            "Enable Loop"
+                        }))
+                        .width(120.0)
+                        .on_press(Event::Loop),
+                    )
+                    .push(
+                        Text::new(format!(
+                            "{}:{:02}s",
+                            self.position as u64 / 60,
+                            self.position as u64 % 60,
+                            // self.video.total_frames().as_secs() / 60,
+                            // self.video.total_frames().as_secs() % 60,
+                        ))
+                        .width(iced::Length::Fill)
+                        .align_x(iced::alignment::Horizontal::Right),
+                    ),
+            )
+            .into()
     }
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for VideoPlayer<'a, Message, Theme, Renderer>
+    for Video<'a, Message, Theme, Renderer>
 where
     Message: Clone,
     Renderer: PrimitiveRenderer,
@@ -209,7 +255,7 @@ where
         _viewport: &iced::Rectangle,
     ) -> Status {
         if let iced::Event::Window(iced::window::Event::RedrawRequested(_)) = event {
-            let mut video = self.video.borrow_mut();
+            let video = self.video.borrow_mut();
 
             if video.is_playing() {
                 // Get the video's frame duration
@@ -248,14 +294,14 @@ where
     }
 }
 
-impl<'a, Message, Theme, Renderer> From<VideoPlayer<'a, Message, Theme, Renderer>>
+impl<'a, Message, Theme, Renderer> From<Video<'a, Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a + Clone,
     Theme: 'a,
     Renderer: 'a + PrimitiveRenderer,
 {
-    fn from(video_player: VideoPlayer<'a, Message, Theme, Renderer>) -> Self {
+    fn from(video_player: Video<'a, Message, Theme, Renderer>) -> Self {
         Self::new(video_player)
     }
 }
