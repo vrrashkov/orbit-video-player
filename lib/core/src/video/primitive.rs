@@ -13,7 +13,6 @@ use std::{
 #[repr(C)]
 struct Uniforms {
     rect: [f32; 4],
-    // because wgpu min_uniform_buffer_offset_alignment
     _pad: [u8; 240],
 }
 

@@ -3,7 +3,7 @@ use iced::{
     Element,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
-use nebula_core::video::{primitive::VideoPrimitive, state::VideoState};
+use nebula_core::video::{decoder::VideoDecoder, primitive::VideoPrimitive};
 use std::{
     borrow::{Borrow, BorrowMut},
     cell::RefCell,
@@ -16,7 +16,7 @@ pub struct VideoPlayer<'a, Message, Theme = iced::Theme, Renderer = iced::Render
 where
     Renderer: PrimitiveRenderer,
 {
-    video: &'a RefCell<VideoState>,
+    video: &'a RefCell<VideoDecoder>,
     content_fit: iced::ContentFit,
     width: iced::Length,
     height: iced::Length,
@@ -29,7 +29,7 @@ impl<'a, Message, Theme, Renderer> VideoPlayer<'a, Message, Theme, Renderer>
 where
     Renderer: PrimitiveRenderer,
 {
-    pub fn new(video: &'a RefCell<VideoState>) -> Self {
+    pub fn new(video: &'a RefCell<VideoDecoder>) -> Self {
         VideoPlayer {
             video,
             content_fit: iced::ContentFit::default(),
@@ -175,7 +175,7 @@ where
                     render(renderer);
                 }
             }
-        } else if let Some(last_frame) = video.decoder.get_last_frame() {
+        } else if let Some(last_frame) = video.get_last_frame() {
             // Render the last frame if we're not getting a new one
             let primitive = VideoPrimitive::new(
                 1,

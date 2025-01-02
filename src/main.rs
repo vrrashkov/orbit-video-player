@@ -5,7 +5,7 @@ use iced::{
 };
 use iced::{Renderer, Settings};
 use nebula_common::VideoError;
-use nebula_core::video::state::VideoState;
+use nebula_core::video::decoder::VideoDecoder;
 use nebula_ui::components::player::VideoPlayer;
 use std::{cell::RefCell, time::Duration};
 use std::{path::Path, sync::Arc};
@@ -33,7 +33,7 @@ enum Message {
     NewFrame,
 }
 struct App {
-    video: RefCell<VideoState>,
+    video: RefCell<VideoDecoder>,
     position: f64,
     dragging: bool,
 }
@@ -46,7 +46,7 @@ impl Default for App {
         }
         let start_frame = 1;
         let end_frame = 435;
-        let state = RefCell::new(VideoState::new(1, video_path, start_frame, end_frame).unwrap());
+        let state = RefCell::new(VideoDecoder::new(video_path, start_frame, end_frame).unwrap());
 
         App {
             video: state,

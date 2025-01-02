@@ -23,6 +23,7 @@ pub struct VideoDecoder {
     presentation_queue: VecDeque<Vec<u8>>,
     max_queue_size: usize, // e.g., 5-10 frames
     frame_timer: Instant,
+    pub is_playing: bool,
 }
 
 impl VideoDecoder {
@@ -97,6 +98,7 @@ impl VideoDecoder {
             presentation_queue: VecDeque::new(),
             max_queue_size: 10,
             max_buffer_size: 5, // Adjust this value as needed
+            is_playing: false,
         };
 
         // Pre-buffer frames
@@ -282,20 +284,6 @@ impl VideoDecoder {
     pub fn height(&self) -> u32 {
         self.decoder.height() as u32
     }
-    fn skip_frame(&mut self) -> Result<(), VideoError> {
-        if let Some((stream, packet)) = self.format_context.packets().next() {
-            if stream.index() == self.video_stream_index {
-                self.decoder.send_packet(&packet).map_err(|e| {
-                    VideoError::Decode(format!("Failed to send packet while skipping: {}", e))
-                })?;
-                let mut frame = ffmpeg::frame::Video::empty();
-                self.decoder.receive_frame(&mut frame).map_err(|e| {
-                    VideoError::Decode(format!("Failed to receive frame while skipping: {}", e))
-                })?;
-            }
-        }
-        Ok(())
-    }
     pub fn seek_to_frame(&mut self, frame: u32) -> Result<(), VideoError> {
         let video_stream = self
             .format_context
@@ -345,6 +333,30 @@ impl VideoDecoder {
             .unwrap_or((30, 1).into()); // fallback to 30fps if we can't get the rate
 
         frame_rate.0 as f64 / frame_rate.1 as f64
+    }
+
+    // Control methods
+    pub fn play(&mut self) {
+        self.is_playing = true;
+    }
+
+    pub fn pause(&mut self) {
+        self.is_playing = false;
+    }
+    pub fn is_playing(&self) -> bool {
+        self.is_playing
+    }
+    pub fn update(&mut self) -> Result<Option<Vec<u8>>, VideoError> {
+        if self.is_playing {
+            self.next_frame()
+        } else {
+            Ok(self.get_last_frame())
+        }
+    }
+    pub fn get_frame_duration(&self) -> Duration {
+        // Return the frame duration based on your video's FPS
+        let fps = self.get_fps();
+        Duration::from_secs_f64(1.0 / fps)
     }
 }
 impl Drop for VideoDecoder {
