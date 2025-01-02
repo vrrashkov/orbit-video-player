@@ -1,15 +1,9 @@
-use ffmpeg_next as ffmpeg;
-use iced::{
-    widget::{Button, Column, Container, Row, Slider, Text},
-    Element,
-};
-use iced::{Renderer, Settings};
-use nebula_common::VideoError;
+use iced::{widget::Container, Element};
 use nebula_core::video::stream::VideoStream;
-use nebula_ui::widgets::video_player::{element::Player, Video};
-use std::{cell::RefCell, time::Duration};
-use std::{path::Path, sync::Arc};
-use tracing::{info, Level};
+use nebula_ui::widgets::video_player::element::Player;
+use std::cell::RefCell;
+use std::path::Path;
+use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
 fn main() -> iced::Result {
