@@ -1,6 +1,9 @@
 use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum VideoError {
+    #[error("Timestamp error: {0}")]
+    Timestamp(i32),
+
     #[error("FFmpeg error: {0}")]
     FFmpeg(#[from] ffmpeg_next::Error),
 

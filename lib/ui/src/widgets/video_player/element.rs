@@ -104,7 +104,7 @@ impl Player {
             )
             .push(
                 Container::new(
-                    Slider::new(0.0..=total.as_secs_f64(), self.position, Event::Seek)
+                    Slider::new(0.0..=total, self.position, Event::Seek)
                         .step(0.1)
                         .on_release(Event::SeekRelease),
                 )
@@ -132,10 +132,10 @@ impl Player {
                     .push(
                         Text::new(format!(
                             "{:02}:{:02} / {:02}:{:02}",
-                            current.as_secs() / 60,
-                            current.as_secs() % 60,
-                            total.as_secs() / 60,
-                            total.as_secs() % 60,
+                            current.as_secs() as i32 / 60,
+                            current.as_secs() as i32 % 60,
+                            total as i32 / 60,
+                            total as i32 % 60,
                         ))
                         .width(iced::Length::Fill)
                         .align_x(iced::alignment::Horizontal::Right),
@@ -165,8 +165,8 @@ where
         limits: &layout::Limits,
     ) -> layout::Node {
         let (video_width, video_height) = (
-            self.video.borrow().decoder.width() as f32,
-            self.video.borrow().decoder.height() as f32,
+            self.video.borrow().width() as f32,
+            self.video.borrow().height() as f32,
         );
 
         let image_size = iced::Size::new(video_width, video_height);
@@ -198,8 +198,7 @@ where
     ) {
         let mut video = self.video.borrow_mut();
         let bounds = layout.bounds();
-        let image_size =
-            iced::Size::new(video.decoder.width() as f32, video.decoder.height() as f32);
+        let image_size = iced::Size::new(video.width() as f32, video.height() as f32);
 
         let adjusted_fit = self.content_fit.fit(image_size, bounds.size());
         let scale = iced::Vector::new(
@@ -224,7 +223,7 @@ where
             tracing::info!("Video playing, requesting frame");
             if let Ok(Some(frame_data)) = video.update() {
                 // Call update() here
-                tracing::info!("Got frame data at frame {}", video.current_frame());
+                tracing::info!("Got frame data at frame {}", video.current_time());
                 let primitive = VideoPrimitive::new(
                     1,
                     true,
@@ -289,7 +288,7 @@ where
                     shell.publish(message.clone());
                 }
                 // Check for end of video
-                if video.current_frame() >= video.end_frame() {
+                if video.current_time().as_secs_f64() >= video.total_time() {
                     if let Some(ref message) = self.on_end_of_stream {
                         shell.publish(message.clone());
                     }

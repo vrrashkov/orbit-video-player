@@ -11,5 +11,7 @@ ffmpeg-next.workspace = true
 winit.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
+video-rs.workspace = true
+ndarray.workspace = true
 # Local
 nebula-common.workspace = true
