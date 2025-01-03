@@ -51,17 +51,16 @@ impl Player {
             }
             Event::Seek(secs) => {
                 self.dragging = true;
-                self.stream.borrow_mut().pause();
+                self.stream.borrow_mut().pause(); // Pause while seeking
+
                 self.position = secs;
                 let seek_result = self.stream.borrow_mut().seek_to_time(self.position);
                 match seek_result {
-                    Ok(_) => {}
+                    Ok(_) => if let Ok(Some(_)) = self.stream.borrow_mut().update() {},
                     Err(e) => {
                         tracing::error!("Failed to seek: {:?}", e)
                     }
                 }
-                let current = self.stream.borrow().current_time().as_secs_f64();
-                tracing::info!("Current time: {}", current);
             }
             Event::SeekRelease => {
                 self.dragging = false;
@@ -185,7 +184,6 @@ where
 
         layout::Node::new(final_size)
     }
-
     fn draw(
         &self,
         _tree: &widget::Tree,
@@ -220,38 +218,26 @@ where
         };
 
         let drawing_bounds = iced::Rectangle::new(position, final_size);
-        if video.is_playing() {
-            tracing::info!("Video playing, requesting frame");
-            if let Ok(Some(frame_data)) = video.update() {
-                // Call update() here
-                tracing::info!("Got frame data at frame {}", video.current_frame());
-                let primitive = VideoPrimitive::new(
-                    1,
-                    true,
-                    frame_data,
-                    (image_size.width as _, image_size.height as _),
-                    true,
-                );
 
-                let render = |renderer: &mut Renderer| {
-                    renderer.draw_primitive(drawing_bounds, primitive.clone());
-                };
+        // Get frame data, whether playing or not
+        let frame_data = if let Ok(Some(data)) = video.update() {
+            Some(data)
+        } else {
+            None
+        };
 
-                if adjusted_fit.width > bounds.width || adjusted_fit.height > bounds.height {
-                    renderer.with_layer(bounds, render);
-                } else {
-                    render(renderer);
-                }
-            }
-        } else if let Some(last_frame) = video.get_last_frame() {
-            // Render the last frame if we're not getting a new one
+        // Render frame if we have data
+        if let Some(frame_data) = frame_data {
+            let frame_id = video.current_frame();
+            // tracing::info!("Rendering frame {}", frame_id);
+
             let primitive = VideoPrimitive::new(
-                1,
-                true,
-                last_frame,
+                frame_id, // Use current frame as unique ID
+                true,     // Force update
+                frame_data,
                 (image_size.width as _, image_size.height as _),
-                // Show texture when frame changing
-                true,
+                true, // Always create new texture
+                video.color_space,
             );
 
             let render = |renderer: &mut Renderer| {

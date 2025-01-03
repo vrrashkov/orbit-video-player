@@ -5,6 +5,7 @@ struct VertexOutput {
 
 struct Uniforms {
     rect: vec4<f32>,
+    color_space: u32,  
 }
 
 @group(0) @binding(0)
@@ -38,24 +39,27 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let yuv2r = vec3<f32>(1.164, 0.0, 1.596);
-    let yuv2g = vec3<f32>(1.164, -0.391, -0.813);
-    let yuv2b = vec3<f32>(1.164, 2.018, 0.0);
-
-    var yuv = vec3<f32>(0.0);
-    yuv.x = textureSample(tex_y, s, in.uv).r - 0.0625;
-    yuv.y = textureSample(tex_uv, s, in.uv).r - 0.5;
-    yuv.z = textureSample(tex_uv, s, in.uv).g - 0.5;
-
-    var rgb = vec3<f32>(0.0);
-    rgb.x = dot(yuv, yuv2r);
-    rgb.y = dot(yuv, yuv2g);
-    rgb.z = dot(yuv, yuv2b);
-
-    let threshold = rgb <= vec3<f32>(0.04045);
-    let hi = pow((rgb + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4));
-    let lo = rgb * vec3<f32>(1.0 / 12.92);
-    rgb = select(hi, lo, threshold);
-
-    return vec4<f32>(rgb, 1.0);
+    // Sample Y and UV planes
+    let y = textureSample(tex_y, s, in.uv).r;
+    let uv = textureSample(tex_uv, s, in.uv * 0.5);
+    
+    // BT.709 conversion for full range YUV
+    let kr = 0.2126;
+    let kb = 0.0722;
+    let kg = 1.0 - kr - kb;
+    
+    let y_norm = y;
+    let u_norm = uv.r - 0.5;
+    let v_norm = uv.g - 0.5;
+    
+    let r = y_norm + (2.0 * (1.0 - kr)) * v_norm;
+    let g = y_norm - (2.0 * (1.0 - kr) * kr / kg) * v_norm - (2.0 * (1.0 - kb) * kb / kg) * u_norm;
+    let b = y_norm + (2.0 * (1.0 - kb)) * u_norm;
+    
+    return vec4<f32>(
+        clamp(r, 0.0, 1.0),
+        clamp(g, 0.0, 1.0),
+        clamp(b, 0.0, 1.0),
+        1.0
+    );
 }

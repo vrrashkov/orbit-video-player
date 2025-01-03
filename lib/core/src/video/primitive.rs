@@ -1,3 +1,4 @@
+use ffmpeg_next::color::{self, Space};
 use iced_wgpu::primitive::Primitive;
 use iced_wgpu::wgpu;
 use std::{
@@ -8,6 +9,7 @@ use std::{
 #[repr(C)]
 struct Uniforms {
     rect: [f32; 4],
+    color_space: [u32; 1],
     _pad: [u8; 240],
 }
 
@@ -69,7 +71,7 @@ impl VideoPipeline {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: true,
@@ -306,7 +308,13 @@ impl VideoPipeline {
         }
     }
 
-    fn prepare(&mut self, queue: &wgpu::Queue, video_id: u64, bounds: &iced::Rectangle) {
+    fn prepare(
+        &mut self,
+        queue: &wgpu::Queue,
+        video_id: u64,
+        bounds: &iced::Rectangle,
+        color_space: Space,
+    ) {
         if let Some(video) = self.videos.get_mut(&video_id) {
             let uniforms = Uniforms {
                 rect: [
@@ -315,6 +323,7 @@ impl VideoPipeline {
                     bounds.x + bounds.width,
                     bounds.y + bounds.height,
                 ],
+                color_space: [color_space as u32],
                 _pad: [0; 240],
             };
             queue.write_buffer(
@@ -383,6 +392,7 @@ pub struct VideoPrimitive {
     frame: Vec<u8>,
     size: (u32, u32),
     upload_frame: bool,
+    color_space: Space,
 }
 
 impl VideoPrimitive {
@@ -392,6 +402,7 @@ impl VideoPrimitive {
         frame: Vec<u8>,
         size: (u32, u32),
         upload_frame: bool,
+        color_space: Space,
     ) -> Self {
         VideoPrimitive {
             video_id,
@@ -399,6 +410,7 @@ impl VideoPrimitive {
             frame,
             size,
             upload_frame,
+            color_space,
         }
     }
 }
@@ -438,6 +450,7 @@ impl Primitive for VideoPrimitive {
                     viewport.logical_size().width as _,
                     viewport.logical_size().height as _,
                 )),
+            self.color_space,
         );
     }
 
