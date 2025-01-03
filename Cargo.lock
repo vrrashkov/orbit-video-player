@@ -2206,6 +2206,7 @@ name = "nebula-common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ffmpeg-next",
  "iced",
  "thiserror 2.0.9",
  "wgpu 23.0.1",

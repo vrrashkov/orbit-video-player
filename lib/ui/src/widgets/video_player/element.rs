@@ -53,9 +53,6 @@ impl Player {
                 self.dragging = true;
                 self.stream.borrow_mut().pause();
                 self.position = secs;
-            }
-            Event::SeekRelease => {
-                self.dragging = false;
                 let seek_result = self.stream.borrow_mut().seek_to_time(self.position);
                 match seek_result {
                     Ok(_) => {}
@@ -63,6 +60,11 @@ impl Player {
                         tracing::error!("Failed to seek: {:?}", e)
                     }
                 }
+                let current = self.stream.borrow().current_time().as_secs_f64();
+                tracing::info!("Current time: {}", current);
+            }
+            Event::SeekRelease => {
+                self.dragging = false;
                 self.stream.borrow_mut().pause();
             }
             Event::EndOfStream => {
@@ -248,7 +250,8 @@ where
                 true,
                 last_frame,
                 (image_size.width as _, image_size.height as _),
-                false, // Don't re-upload the texture
+                // Show texture when frame changing
+                true,
             );
 
             let render = |renderer: &mut Renderer| {

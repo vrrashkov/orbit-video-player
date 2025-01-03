@@ -1,9 +1,14 @@
-use ffmpeg_next::{self as ffmpeg, error::EAGAIN};
+use ffmpeg_next::{self as ffmpeg, error::EAGAIN, ffi::AV_TIME_BASE};
 use nebula_common::VideoError;
 use std::{
     collections::VecDeque,
     time::{Duration, Instant},
 };
+pub struct QueuedFrame {
+    pub data: Vec<u8>,
+    pub frame_number: u64,
+}
+
 pub struct VideoStream {
     pub decoder: ffmpeg::decoder::Video,
     format_context: ffmpeg::format::context::Input,
@@ -12,8 +17,7 @@ pub struct VideoStream {
     start_frame: u64,
     end_frame: Option<u64>,
     looping: bool,
-    frame_buffer: Vec<Vec<u8>>,
-    presentation_queue: VecDeque<Vec<u8>>,
+    presentation_queue: VecDeque<QueuedFrame>,
     max_queue_size: usize, // e.g., 5-10 frames
     frame_timer: Instant,
     pub is_playing: bool,
@@ -27,17 +31,15 @@ pub struct VideoStreamOptions<'a> {
 impl VideoStream {
     pub fn new(options: VideoStreamOptions) -> Result<Self, VideoError> {
         // 3. Initialize FFmpeg
-        ffmpeg::init()
-            .map_err(|e| VideoError::FFmpeg(format!("Failed to initialize FFmpeg: {}", e)))?;
+        ffmpeg::init()?;
 
         tracing::info!("Loading video from: {}", options.video_path);
-        let mut format_context = ffmpeg::format::input(&options.video_path)
-            .map_err(|e| VideoError::FFmpeg(format!("Failed to open video file: {}", e)))?;
+        let mut format_context = ffmpeg::format::input(&options.video_path)?;
 
         let video_stream = format_context
             .streams()
             .best(ffmpeg::media::Type::Video)
-            .ok_or_else(|| VideoError::FFmpeg("No video stream found".into()))?;
+            .ok_or(VideoError::StreamNotFound("Video stream not found"))?;
 
         let frame_rate = video_stream.rate();
         tracing::info!("Frame rate: {}/{} fps", frame_rate.0, frame_rate.1);
@@ -45,29 +47,16 @@ impl VideoStream {
         let frame_duration = std::time::Duration::from_secs_f64(1.0 / fps);
         tracing::info!("Frame duration: {:?}", frame_duration);
 
-        let time_base = video_stream.time_base();
         let video_stream_index = video_stream.index();
         let parameters = video_stream.parameters();
+        let time_s = ((options.start_frame - 1) as f64 / fps) as f64;
+        let timestamp = (time_s * AV_TIME_BASE as f64) as i64;
+        tracing::info!("timestamp: {:?}", timestamp);
+        format_context.seek(timestamp, timestamp..)?;
 
-        let timestamp = (options.start_frame as i64 * time_base.denominator() as i64)
-            / (time_base.numerator() as i64 * frame_rate.0 as i64);
+        let context = ffmpeg::codec::Context::from_parameters(parameters)?;
 
-        format_context
-            .seek(timestamp, timestamp..timestamp + 1)
-            .map_err(|e| {
-                VideoError::SeekError(format!(
-                    "Failed to seek to frame {}: {}",
-                    options.start_frame, e
-                ))
-            })?;
-
-        let context = ffmpeg::codec::Context::from_parameters(parameters)
-            .map_err(|e| VideoError::FFmpeg(format!("Failed to create codec context: {}", e)))?;
-
-        let decoder = context
-            .decoder()
-            .video()
-            .map_err(|e| VideoError::FFmpeg(format!("Failed to create video decoder: {}", e)))?;
+        let decoder = context.decoder().video()?;
 
         let now = Instant::now();
         let mut decoder = Self {
@@ -79,7 +68,6 @@ impl VideoStream {
             start_frame: options.start_frame,
             end_frame: options.end_frame,
             looping: false,
-            frame_buffer: Vec::new(),
             presentation_queue: VecDeque::new(),
             max_queue_size: 10,
             is_playing: false,
@@ -96,10 +84,7 @@ impl VideoStream {
         if self.presentation_queue.is_empty() {
             tracing::info!("Initial buffer fill");
             while self.presentation_queue.len() < self.max_queue_size {
-                match self.decode_next_frame()? {
-                    Some(_) => continue,
-                    None => break,
-                }
+                self.decode_next_frame()?;
             }
         }
 
@@ -112,11 +97,11 @@ impl VideoStream {
             }
 
             // Return the next frame from queue
-            return Ok(self.presentation_queue.pop_front());
+            return Ok(self.presentation_queue.pop_front().map(|f| f.data.clone()));
         }
 
         // If not time yet, return current frame
-        Ok(self.presentation_queue.front().cloned())
+        Ok(self.presentation_queue.front().map(|f| f.data.clone()))
     }
     pub fn should_process_frame(&mut self) -> bool {
         let now = Instant::now();
@@ -145,111 +130,97 @@ impl VideoStream {
         }
     }
     pub fn get_last_frame(&self) -> Option<Vec<u8>> {
-        self.frame_buffer.last().cloned()
+        self.presentation_queue.front().map(|f| f.data.clone())
     }
-    fn decode_next_frame(&mut self) -> Result<Option<Vec<u8>>, VideoError> {
-        tracing::info!("Starting frame decode");
+    fn decode_next_frame(&mut self) -> Result<(), VideoError> {
         if self.presentation_queue.len() >= self.max_queue_size {
-            return Ok(None);
-        }
-        if let Some(value) = self.end_frame {
-            if self.current_frame > value {
-                return Ok(None);
-            }
+            return Ok(());
         }
 
-        let mut frame_received = false;
         let mut frame = ffmpeg::frame::Video::empty();
+        let mut packets = self.format_context.packets();
 
-        // Try to receive a frame first (in case there are buffered frames)
-        match self.decoder.receive_frame(&mut frame) {
-            Ok(_) => {
-                frame_received = true;
+        while let Some((stream, packet)) = packets.next() {
+            if stream.index() != self.video_stream_index {
+                continue;
             }
-            Err(ffmpeg::Error::Other { errno: EAGAIN }) => {
-                // Need to send more packets
-            }
-            Err(e) => {
-                return Err(VideoError::Decode(format!(
-                    "Failed to receive frame: {}",
-                    e
-                )))
-            }
-        }
 
-        // If no frame received, try to send more packets and receive again
-        if !frame_received {
-            while let Some((stream, packet)) = self.format_context.packets().next() {
-                if stream.index() != self.video_stream_index {
-                    continue;
-                }
+            self.decoder
+                .send_packet(&packet)
+                .map_err(|e| VideoError::Decode(format!("Failed to send packet: {}", e)))?;
 
-                self.decoder
-                    .send_packet(&packet)
-                    .map_err(|e| VideoError::Decode(format!("Failed to send packet: {}", e)))?;
+            // tracing::info!("Processing packet, current frame: {}", self.current_frame);
+            match self.decoder.receive_frame(&mut frame) {
+                Ok(_) => {
+                    // tracing::info!("Received frame {}", self.current_frame);
+                    tracing::info!(
+                        "Frame PTS: {:?}, current_frame: {}",
+                        frame.pts(),
+                        self.current_frame
+                    );
+                    let mut yuv_frame = ffmpeg::frame::Video::empty();
+                    let mut scaler = ffmpeg::software::scaling::Context::get(
+                        self.decoder.format(),
+                        self.decoder.width(),
+                        self.decoder.height(),
+                        ffmpeg::format::Pixel::YUV420P,
+                        self.decoder.width(),
+                        self.decoder.height(),
+                        ffmpeg::software::scaling::Flags::BILINEAR,
+                    )
+                    .map_err(|e| {
+                        VideoError::FrameProcessing(format!("Failed to create scaler: {}", e))
+                    })?;
+                    scaler.run(&frame, &mut yuv_frame).map_err(|e| {
+                        VideoError::FrameProcessing(format!("Failed to scale frame: {}", e))
+                    })?;
 
-                match self.decoder.receive_frame(&mut frame) {
-                    Ok(_) => {
-                        frame_received = true;
-                        break;
+                    if let Some(pts) = frame.pts() {
+                        // Add logging/validation for YUV data
+                        tracing::info!("Y plane size: {}", yuv_frame.data(0).len());
                     }
-                    Err(ffmpeg::Error::Other { errno: EAGAIN }) => continue,
-                    Err(e) => {
-                        return Err(VideoError::Decode(format!(
-                            "Failed to receive frame: {}",
-                            e
-                        )))
-                    }
+                    let combined = [
+                        yuv_frame.data(0).to_vec(),
+                        yuv_frame.data(1).to_vec(),
+                        yuv_frame.data(2).to_vec(),
+                    ]
+                    .concat();
+                    self.presentation_queue.push_back(QueuedFrame {
+                        data: combined,
+                        frame_number: self.current_frame,
+                    });
+                    tracing::info!(
+                        "Added frame {} to queue (queue size: {})",
+                        self.current_frame,
+                        self.presentation_queue.len()
+                    );
+                    self.current_frame += 1;
+                    return Ok(());
                 }
+                Err(ffmpeg::Error::Other { errno: EAGAIN }) => continue,
+                Err(e) => return Err(VideoError::Decode(e.to_string())),
             }
         }
+        Ok(())
+    }
 
-        if frame_received {
-            let mut yuv_frame = ffmpeg::frame::Video::empty();
-            let mut scaler = ffmpeg::software::scaling::Context::get(
-                self.decoder.format(),
-                self.decoder.width(),
-                self.decoder.height(),
-                ffmpeg::format::Pixel::YUV420P,
-                self.decoder.width(),
-                self.decoder.height(),
-                ffmpeg::software::scaling::Flags::BILINEAR,
-            )
-            .map_err(|e| VideoError::FrameProcessing(format!("Failed to create scaler: {}", e)))?;
+    pub fn seek_to_frame(&mut self, time_s: f64, c_frame: u64) -> Result<(), VideoError> {
+        // Clear state first
+        self.presentation_queue.clear();
 
-            scaler.run(&frame, &mut yuv_frame).map_err(|e| {
-                VideoError::FrameProcessing(format!("Failed to scale frame: {}", e))
-            })?;
+        let timestamp = (time_s * AV_TIME_BASE as f64) as i64;
+        tracing::warn!("seek for: {}", timestamp);
+        self.format_context.seek(timestamp, timestamp..)?;
 
-            // Get and combine planes
-            let y_plane = yuv_frame.data(0).to_vec();
-            let u_plane = yuv_frame.data(1).to_vec();
-            let v_plane = yuv_frame.data(2).to_vec();
+        self.current_frame = c_frame;
+        self.pre_buffer()?;
 
-            let mut combined = Vec::new();
-            combined.extend_from_slice(&y_plane);
-            combined.extend_from_slice(&u_plane);
-            combined.extend_from_slice(&v_plane);
-
-            self.presentation_queue.push_back(combined);
-            self.current_frame += 1;
-            tracing::info!(
-                "Successfully decoded frame {} into queue",
-                self.current_frame
-            );
-            Ok(Some(vec![])) // Just indicate success
-        } else {
-            tracing::info!("No more frames available");
-            Ok(None)
-        }
+        Ok(())
     }
     pub fn pre_buffer(&mut self) -> Result<(), VideoError> {
         tracing::info!("Pre-buffering frames...");
         while self.presentation_queue.len() < self.max_queue_size {
-            match self.decode_next_frame()? {
-                Some(_) => continue,
-                None => break,
-            }
+            self.decode_next_frame()?;
         }
         tracing::info!("Pre-buffered {} frames", self.presentation_queue.len());
         Ok(())
@@ -263,42 +234,24 @@ impl VideoStream {
         self.decoder.height() as u32
     }
     pub fn current_time(&self) -> Duration {
-        Duration::from_secs_f64(self.current_frame as f64 / self.get_fps())
+        let current_second = (self.current_frame() - self.start_frame) as f64 / self.get_fps();
+        Duration::from_secs_f64(current_second)
     }
 
     pub fn total_time(&self) -> Duration {
-        Duration::from_secs_f64(self.total_frames() as f64 / self.get_fps())
-    }
-    pub fn seek_to_frame(&mut self, frame: u64) -> Result<(), VideoError> {
-        let video_stream = self
-            .format_context
-            .streams()
-            .best(ffmpeg::media::Type::Video)
-            .ok_or_else(|| VideoError::FFmpeg("No video stream found".into()))?;
-
-        tracing::info!("seek_to_frame: {}", frame);
-        let time_base = video_stream.time_base();
-        let frame_rate = video_stream.rate();
-
-        let timestamp = (frame as i64 * time_base.denominator() as i64)
-            / (time_base.numerator() as i64 * frame_rate.0 as i64);
-
-        self.format_context
-            .seek(timestamp, timestamp..timestamp + 1)
-            .map_err(|e| {
-                VideoError::SeekError(format!("Failed to seek to frame {}: {}", frame, e))
-            })?;
-
-        self.current_frame = frame;
-        Ok(())
+        let total_seconds = (self.total_frames() - self.start_frame) as f64 / self.get_fps();
+        Duration::from_secs_f64(total_seconds)
     }
     pub fn seek_to_time(&mut self, seconds: f64) -> Result<(), VideoError> {
         tracing::info!("seek_to_time: {}", seconds);
         let frame = (seconds * self.get_fps()) as u64;
-        self.seek_to_frame(frame)
+        self.seek_to_frame(seconds, frame)
     }
     pub fn current_frame(&self) -> u64 {
-        self.current_frame
+        self.presentation_queue
+            .front()
+            .map(|f| f.frame_number.clone())
+            .unwrap_or(1)
     }
 
     pub fn start_frame(&self) -> u64 {
