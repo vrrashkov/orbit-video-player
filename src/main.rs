@@ -1,5 +1,5 @@
 use iced::{widget::Container, Element};
-use nebula_core::video::stream::VideoStream;
+use nebula_core::video::stream::{VideoStream, VideoStreamOptions};
 use nebula_ui::widgets::video_player::element::Player;
 use std::cell::RefCell;
 use std::path::Path;
@@ -31,8 +31,15 @@ impl Default for App {
             panic!("Video file not found at: {}", video_path);
         }
         let start_frame = 1;
-        let end_frame = 435;
-        let stream = RefCell::new(VideoStream::new(video_path, start_frame, end_frame).unwrap());
+        let end_frame = None;
+        let stream = RefCell::new(
+            VideoStream::new(VideoStreamOptions {
+                video_path,
+                start_frame,
+                end_frame,
+            })
+            .unwrap(),
+        );
 
         App {
             video_player: Player::new(stream, 0.0, false),

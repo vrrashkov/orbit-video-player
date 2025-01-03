@@ -46,15 +46,33 @@ impl Player {
                     self.stream.borrow_mut().pause();
                 }
             }
-            Event::Loop => {}
-            Event::Seek(_) => {}
-            Event::SeekRelease => {}
-            Event::EndOfStream => {}
+            Event::Loop => {
+                self.stream.borrow_mut().looping();
+            }
+            Event::Seek(secs) => {
+                self.dragging = true;
+                self.stream.borrow_mut().pause();
+                self.position = secs;
+            }
+            Event::SeekRelease => {
+                self.dragging = false;
+                let seek_result = self.stream.borrow_mut().seek_to_time(self.position);
+                match seek_result {
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::error!("Failed to seek: {:?}", e)
+                    }
+                }
+                self.stream.borrow_mut().pause();
+            }
+            Event::EndOfStream => {
+                self.stream.borrow_mut().pause();
+            }
             Event::NewFrame => {
                 if !self.dragging {
-                    let current = self.stream.borrow().current_frame();
+                    let current = self.stream.borrow().current_time().as_secs_f64();
                     tracing::info!("Current frame: {}", current);
-                    self.position = current as f64;
+                    self.position = current;
                 }
             }
         }
@@ -64,6 +82,8 @@ impl Player {
         let is_playing = self.stream.borrow().is_playing;
         let total_frames = self.stream.borrow().total_frames();
         let is_looping = self.stream.borrow().looping();
+        let current = self.stream.borrow().current_time();
+        let total = self.stream.borrow().total_time();
 
         Column::new()
             .push(
@@ -72,7 +92,7 @@ impl Player {
                         .width(iced::Length::Fill)
                         .height(iced::Length::Fill)
                         .content_fit(iced::ContentFit::Contain)
-                        // .on_end_of_stream(Message::EndOfStream)
+                        .on_end_of_stream(Event::EndOfStream)
                         .on_new_frame(Event::NewFrame),
                 )
                 .align_x(iced::Alignment::Center)
@@ -82,7 +102,7 @@ impl Player {
             )
             .push(
                 Container::new(
-                    Slider::new(0.0..=total_frames as f64, self.position, Event::Seek)
+                    Slider::new(0.0..=total.as_secs_f64(), self.position, Event::Seek)
                         .step(0.1)
                         .on_release(Event::SeekRelease),
                 )
@@ -109,11 +129,11 @@ impl Player {
                     )
                     .push(
                         Text::new(format!(
-                            "{}:{:02}s",
-                            self.position as u64 / 60,
-                            self.position as u64 % 60,
-                            // self.video.total_frames().as_secs() / 60,
-                            // self.video.total_frames().as_secs() % 60,
+                            "{:02}:{:02} / {:02}:{:02}",
+                            current.as_secs() / 60,
+                            current.as_secs() % 60,
+                            total.as_secs() / 60,
+                            total.as_secs() % 60,
                         ))
                         .width(iced::Length::Fill)
                         .align_x(iced::alignment::Horizontal::Right),
@@ -262,18 +282,12 @@ where
                 let frame_duration = video.get_frame_duration();
                 shell.request_redraw(iced::window::RedrawRequest::NextFrame);
 
-                // Only publish new frame message if we actually got a new frame
-                // if video.decoder.should_process_frame() {
-                //     if let Some(ref message) = self.on_new_frame {
-                //         shell.publish(message.clone());
-                //     }
-                // }
                 if let Some(ref message) = self.on_new_frame {
                     shell.publish(message.clone());
                 }
                 // Check for end of video
                 if video.current_frame() >= video.end_frame() {
-                    if let Some(ref message) = self.on_end_of_frame {
+                    if let Some(ref message) = self.on_end_of_stream {
                         shell.publish(message.clone());
                     }
                 }

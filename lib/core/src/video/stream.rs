@@ -8,9 +8,9 @@ pub struct VideoStream {
     pub decoder: ffmpeg::decoder::Video,
     format_context: ffmpeg::format::context::Input,
     video_stream_index: usize,
-    current_frame: u32,
-    start_frame: u32,
-    end_frame: u32,
+    current_frame: u64,
+    start_frame: u64,
+    end_frame: Option<u64>,
     looping: bool,
     frame_buffer: Vec<Vec<u8>>,
     presentation_queue: VecDeque<Vec<u8>>,
@@ -19,14 +19,19 @@ pub struct VideoStream {
     pub is_playing: bool,
 }
 
+pub struct VideoStreamOptions<'a> {
+    pub video_path: &'a str,
+    pub start_frame: u64,
+    pub end_frame: Option<u64>,
+}
 impl VideoStream {
-    pub fn new(video_path: &str, start_frame: u32, end_frame: u32) -> Result<Self, VideoError> {
+    pub fn new(options: VideoStreamOptions) -> Result<Self, VideoError> {
         // 3. Initialize FFmpeg
         ffmpeg::init()
             .map_err(|e| VideoError::FFmpeg(format!("Failed to initialize FFmpeg: {}", e)))?;
 
-        tracing::info!("Loading video from: {}", video_path);
-        let mut format_context = ffmpeg::format::input(&video_path)
+        tracing::info!("Loading video from: {}", options.video_path);
+        let mut format_context = ffmpeg::format::input(&options.video_path)
             .map_err(|e| VideoError::FFmpeg(format!("Failed to open video file: {}", e)))?;
 
         let video_stream = format_context
@@ -44,13 +49,16 @@ impl VideoStream {
         let video_stream_index = video_stream.index();
         let parameters = video_stream.parameters();
 
-        let timestamp = (start_frame as i64 * time_base.denominator() as i64)
+        let timestamp = (options.start_frame as i64 * time_base.denominator() as i64)
             / (time_base.numerator() as i64 * frame_rate.0 as i64);
 
         format_context
             .seek(timestamp, timestamp..timestamp + 1)
             .map_err(|e| {
-                VideoError::SeekError(format!("Failed to seek to frame {}: {}", start_frame, e))
+                VideoError::SeekError(format!(
+                    "Failed to seek to frame {}: {}",
+                    options.start_frame, e
+                ))
             })?;
 
         let context = ffmpeg::codec::Context::from_parameters(parameters)
@@ -66,10 +74,10 @@ impl VideoStream {
             decoder,
             format_context,
             video_stream_index,
-            current_frame: start_frame,
+            current_frame: options.start_frame,
             frame_timer: now,
-            start_frame,
-            end_frame,
+            start_frame: options.start_frame,
+            end_frame: options.end_frame,
             looping: false,
             frame_buffer: Vec::new(),
             presentation_queue: VecDeque::new(),
@@ -144,8 +152,10 @@ impl VideoStream {
         if self.presentation_queue.len() >= self.max_queue_size {
             return Ok(None);
         }
-        if self.current_frame > self.end_frame {
-            return Ok(None);
+        if let Some(value) = self.end_frame {
+            if self.current_frame > value {
+                return Ok(None);
+            }
         }
 
         let mut frame_received = false;
@@ -252,13 +262,21 @@ impl VideoStream {
     pub fn height(&self) -> u32 {
         self.decoder.height() as u32
     }
-    pub fn seek_to_frame(&mut self, frame: u32) -> Result<(), VideoError> {
+    pub fn current_time(&self) -> Duration {
+        Duration::from_secs_f64(self.current_frame as f64 / self.get_fps())
+    }
+
+    pub fn total_time(&self) -> Duration {
+        Duration::from_secs_f64(self.total_frames() as f64 / self.get_fps())
+    }
+    pub fn seek_to_frame(&mut self, frame: u64) -> Result<(), VideoError> {
         let video_stream = self
             .format_context
             .streams()
             .best(ffmpeg::media::Type::Video)
             .ok_or_else(|| VideoError::FFmpeg("No video stream found".into()))?;
 
+        tracing::info!("seek_to_frame: {}", frame);
         let time_base = video_stream.time_base();
         let frame_rate = video_stream.rate();
 
@@ -274,23 +292,37 @@ impl VideoStream {
         self.current_frame = frame;
         Ok(())
     }
-    pub fn current_frame(&self) -> u32 {
+    pub fn seek_to_time(&mut self, seconds: f64) -> Result<(), VideoError> {
+        tracing::info!("seek_to_time: {}", seconds);
+        let frame = (seconds * self.get_fps()) as u64;
+        self.seek_to_frame(frame)
+    }
+    pub fn current_frame(&self) -> u64 {
         self.current_frame
     }
 
-    pub fn start_frame(&self) -> u32 {
+    pub fn start_frame(&self) -> u64 {
         self.start_frame
     }
-    pub fn end_frame(&self) -> u32 {
-        self.end_frame
+    pub fn end_frame(&self) -> u64 {
+        if let Some(value) = self.end_frame {
+            value
+        } else {
+            self.total_frames()
+        }
     }
 
     pub fn looping(&self) -> bool {
         self.looping
     }
+    pub fn total_frames(&self) -> u64 {
+        let video_stream = self
+            .format_context
+            .streams()
+            .best(ffmpeg::media::Type::Video)
+            .expect("Video stream should exist");
 
-    pub fn total_frames(&self) -> u32 {
-        self.end_frame - self.start_frame
+        video_stream.frames() as u64
     }
     pub fn get_fps(&self) -> f64 {
         let frame_rate = self
@@ -322,7 +354,6 @@ impl VideoStream {
         }
     }
     pub fn get_frame_duration(&self) -> Duration {
-        // Return the frame duration based on your video's FPS
         let fps = self.get_fps();
         Duration::from_secs_f64(1.0 / fps)
     }

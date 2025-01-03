@@ -11,7 +11,7 @@ where
     content_fit: iced::ContentFit,
     width: iced::Length,
     height: iced::Length,
-    on_end_of_frame: Option<Message>,
+    on_end_of_stream: Option<Message>,
     on_new_frame: Option<Message>,
     _phantom: PhantomData<(Theme, Renderer)>,
 }
@@ -26,7 +26,7 @@ where
             content_fit: iced::ContentFit::default(),
             width: iced::Length::Shrink,
             height: iced::Length::Shrink,
-            on_end_of_frame: None,
+            on_end_of_stream: None,
             on_new_frame: None,
             _phantom: Default::default(),
         }
@@ -53,9 +53,9 @@ where
         }
     }
 
-    pub fn on_end_of_frame(self, message: Message) -> Self {
+    pub fn on_end_of_stream(self, message: Message) -> Self {
         Video {
-            on_end_of_frame: Some(message),
+            on_end_of_stream: Some(message),
             ..self
         }
     }
