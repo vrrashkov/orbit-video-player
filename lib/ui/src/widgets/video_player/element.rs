@@ -56,7 +56,7 @@ impl Player {
                 self.position = secs;
                 let seek_result = self.stream.borrow_mut().seek_to_time(self.position);
                 match seek_result {
-                    Ok(_) => if let Ok(Some(_)) = self.stream.borrow_mut().update() {},
+                    Ok(_) => {}
                     Err(e) => {
                         tracing::error!("Failed to seek: {:?}", e)
                     }
