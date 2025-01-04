@@ -319,10 +319,19 @@ impl VideoStream {
                         }
                     }
                     Err(ffmpeg::Error::Other { errno: EAGAIN }) => {
-                        if let Some((stream, packet)) = self.format_context.packets().next() {
-                            if stream.index() == self.video_stream_index {
+                        match self.format_context.packets().next() {
+                            Some((stream, packet)) if stream.index() == self.video_stream_index => {
                                 self.decoder.send_packet(&packet)?;
                             }
+                            None => {
+                                // End of file reached during seek
+                                if !found_target {
+                                    // If we haven't found our target frame, it means we're seeking past the end
+                                    return Ok(());
+                                }
+                                break;
+                            }
+                            _ => continue,
                         }
                     }
                     Err(e) => return Err(VideoError::Decode(e.to_string())),
