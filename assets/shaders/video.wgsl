@@ -36,25 +36,23 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
     out.position = vec4<f32>(quad[in_vertex_index].xy, 1.0, 1.0);
     return out;
 }
-
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Sample Y and UV planes
     let y = textureSample(tex_y, s, in.uv).r;
-    let uv = textureSample(tex_uv, s, in.uv * 0.5);
+    let uv = textureSample(tex_uv, s, in.uv).rg;
     
-    // BT.709 conversion for full range YUV
-    let kr = 0.2126;
-    let kb = 0.0722;
-    let kg = 1.0 - kr - kb;
+    // YUV is in MPEG range (limited)
+    let y_range = (y - 16.0/255.0) * (255.0/219.0);
     
-    let y_norm = y;
-    let u_norm = uv.r - 0.5;
-    let v_norm = uv.g - 0.5;
-    
-    let r = y_norm + (2.0 * (1.0 - kr)) * v_norm;
-    let g = y_norm - (2.0 * (1.0 - kr) * kr / kg) * v_norm - (2.0 * (1.0 - kb) * kb / kg) * u_norm;
-    let b = y_norm + (2.0 * (1.0 - kb)) * u_norm;
+    // UV values are packed in RG channels, need to recenter around 0
+    let u = (uv.r - 128.0/255.0) * (255.0/224.0);
+    let v = (uv.g - 128.0/255.0) * (255.0/224.0);
+
+    // BT.709 matrix (standard HDTV)
+    let r = y_range + 1.5748 * v;
+    let g = y_range - 0.1873 * u - 0.4681 * v;
+    let b = y_range + 1.8556 * u;
     
     return vec4<f32>(
         clamp(r, 0.0, 1.0),

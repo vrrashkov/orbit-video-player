@@ -27,7 +27,7 @@ wgpu = "23.0"
 winit = "0.29"
 bytemuck = { version = "1.14", features = ["derive"] }
 pollster = "0.4"
-ffmpeg-next = "7.1"  
+ffmpeg-next = { version = "7.1" }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 thiserror = "2.0.9"

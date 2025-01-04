@@ -2,7 +2,10 @@ use ffmpeg_next::{
     self as ffmpeg,
     color::Space,
     error::EAGAIN,
-    ffi::{av_seek_frame, AVMediaType, AVSEEK_FLAG_ANY, AVSEEK_FLAG_FRAME, AV_TIME_BASE},
+    ffi::{
+        av_seek_frame, AVColorPrimaries, AVColorRange, AVColorSpace, AVColorTransferCharacteristic,
+        AVMediaType, AVSEEK_FLAG_ANY, AVSEEK_FLAG_FRAME, AV_TIME_BASE,
+    },
 };
 
 use nebula_common::VideoError;
@@ -70,10 +73,19 @@ impl VideoStream {
 
         let context = ffmpeg::codec::Context::from_parameters(parameters)?;
 
-        let decoder = context.decoder().video()?;
+        let mut decoder = context.decoder().video()?;
 
         let color_space = decoder.color_space();
         tracing::warn!("color_space: {:?}", color_space);
+        // Log input color details
+        tracing::info!(
+        "Input format: {:?}, Color space: {:?}, Color range: {:?}, Color primaries: {:?}, Color TRC: {:?}",
+        decoder.format(),
+        decoder.color_space(),
+        decoder.color_range(),
+        decoder.color_primaries(),
+        decoder.color_transfer_characteristic()
+    );
 
         let now = Instant::now();
         let yuv_frame = ffmpeg::frame::Video::empty();
@@ -84,8 +96,16 @@ impl VideoStream {
             ffmpeg::format::Pixel::YUV420P,
             decoder.width(),
             decoder.height(),
-            ffmpeg::software::scaling::Flags::BILINEAR,
+            ffmpeg::software::scaling::Flags::BITEXACT |  // Ensure exact conversion
+            ffmpeg::software::scaling::Flags::ACCURATE_RND, // Use accurate rounding
         )?;
+        // Set color space properties
+        unsafe {
+            (*decoder.as_mut_ptr()).colorspace = AVColorSpace::AVCOL_SPC_BT709;
+            (*decoder.as_mut_ptr()).color_primaries = AVColorPrimaries::AVCOL_PRI_BT709;
+            (*decoder.as_mut_ptr()).color_trc = AVColorTransferCharacteristic::AVCOL_TRC_BT709;
+            (*decoder.as_mut_ptr()).color_range = AVColorRange::AVCOL_RANGE_MPEG;
+        }
         let frame_buffer = Vec::with_capacity(Self::calculate_buffer_size(&decoder));
         let mut decoder = Self {
             decoder,
@@ -130,25 +150,40 @@ impl VideoStream {
             .ok_or(VideoError::StreamNotFound("Video stream not found"))
     }
     fn process_video_frame(&mut self, frame: &ffmpeg::frame::Video) -> Result<Vec<u8>, VideoError> {
-        // Reuse existing objects instead of creating new ones
-        self.scaler.run(frame, &mut self.yuv_frame)?;
-
-        // Clear and reuse buffer
         self.frame_buffer.clear();
-        self.frame_buffer.extend_from_slice(self.yuv_frame.data(0));
 
-        // Process UV planes
-        for (u, v) in self
-            .yuv_frame
-            .data(1)
-            .iter()
-            .zip(self.yuv_frame.data(2).iter())
-        {
-            self.frame_buffer.push(*u);
-            self.frame_buffer.push(*v);
+        // Preserve color properties
+        unsafe {
+            (*self.yuv_frame.as_mut_ptr()).colorspace = AVColorSpace::AVCOL_SPC_BT709;
+            (*self.yuv_frame.as_mut_ptr()).color_primaries = AVColorPrimaries::AVCOL_PRI_BT709;
+            (*self.yuv_frame.as_mut_ptr()).color_trc =
+                AVColorTransferCharacteristic::AVCOL_TRC_BT709;
+            (*self.yuv_frame.as_mut_ptr()).color_range = AVColorRange::AVCOL_RANGE_MPEG;
         }
 
-        Ok(self.frame_buffer.clone()) // Only clone at the end
+        self.scaler.run(frame, &mut self.yuv_frame)?;
+
+        // Y plane
+        let y_plane = self.yuv_frame.data(0);
+        self.frame_buffer.extend_from_slice(y_plane);
+
+        // UV planes
+        let width = self.decoder.width() as usize;
+        let height = self.decoder.height() as usize;
+        let uv_width = width / 2;
+        let uv_height = height / 2;
+
+        for y in 0..uv_height {
+            let u_line = &self.yuv_frame.data(1)[y * uv_width..(y + 1) * uv_width];
+            let v_line = &self.yuv_frame.data(2)[y * uv_width..(y + 1) * uv_width];
+
+            for x in 0..uv_width {
+                self.frame_buffer.push(u_line[x]);
+                self.frame_buffer.push(v_line[x]);
+            }
+        }
+
+        Ok(self.frame_buffer.clone())
     }
 
     fn add_frame_to_queue(&mut self, frame: ffmpeg::frame::Video) -> Result<(), VideoError> {

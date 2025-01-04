@@ -271,7 +271,7 @@ impl VideoPipeline {
                 depth_or_array_layers: 1,
             },
         );
-
+        let uv_data = &frame[(width * height) as usize..];
         queue.write_texture(
             wgpu::ImageCopyTexture {
                 texture: texture_uv,
@@ -279,10 +279,10 @@ impl VideoPipeline {
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            &frame[(width * height) as usize..],
+            uv_data,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(width),
+                bytes_per_row: Some(width / 2 * 2), // Each row needs 2 bytes per pixel for UV
                 rows_per_image: Some(height / 2),
             },
             wgpu::Extent3d {
