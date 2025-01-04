@@ -29,6 +29,9 @@ pub struct VideoStream {
     frame_timer: Instant,
     pub is_playing: bool,
     pub color_space: Space,
+    frame_buffer: Vec<u8>,           // Add this for processing
+    yuv_frame: ffmpeg::frame::Video, // Reuse these objects
+    scaler: ffmpeg::software::scaling::Context,
 }
 
 pub struct VideoStreamOptions<'a> {
@@ -73,6 +76,17 @@ impl VideoStream {
         tracing::warn!("color_space: {:?}", color_space);
 
         let now = Instant::now();
+        let yuv_frame = ffmpeg::frame::Video::empty();
+        let scaler = ffmpeg::software::scaling::Context::get(
+            decoder.format(),
+            decoder.width(),
+            decoder.height(),
+            ffmpeg::format::Pixel::YUV420P,
+            decoder.width(),
+            decoder.height(),
+            ffmpeg::software::scaling::Flags::BILINEAR,
+        )?;
+        let frame_buffer = Vec::with_capacity(Self::calculate_buffer_size(&decoder));
         let mut decoder = Self {
             decoder,
             format_context,
@@ -86,12 +100,29 @@ impl VideoStream {
             max_queue_size: DEFAULT_QUEUE_SIZE,
             is_playing: false,
             color_space,
+            yuv_frame,
+            scaler,
+            frame_buffer,
         };
 
         decoder.pre_buffer_with_seek(None)?;
 
         Ok(decoder)
     }
+    fn calculate_buffer_size(decoder: &ffmpeg::decoder::Video) -> usize {
+        let width = decoder.width() as usize;
+        let height = decoder.height() as usize;
+
+        // For YUV420P:
+        // Y plane: width * height
+        // U and V planes: (width/2) * (height/2) each
+        // Then U and V are interleaved, so we need:
+        let y_size = width * height;
+        let uv_size = width * height / 2; // This accounts for both U and V interleaved
+
+        y_size + uv_size // Total size needed
+    }
+
     fn get_video_stream(&self) -> Result<ffmpeg::Stream, VideoError> {
         self.format_context
             .streams()
@@ -99,26 +130,25 @@ impl VideoStream {
             .ok_or(VideoError::StreamNotFound("Video stream not found"))
     }
     fn process_video_frame(&mut self, frame: &ffmpeg::frame::Video) -> Result<Vec<u8>, VideoError> {
-        let mut yuv_frame = ffmpeg::frame::Video::empty();
-        let mut scaler = ffmpeg::software::scaling::Context::get(
-            self.decoder.format(),
-            self.decoder.width(),
-            self.decoder.height(),
-            ffmpeg::format::Pixel::YUV420P,
-            self.decoder.width(),
-            self.decoder.height(),
-            ffmpeg::software::scaling::Flags::BILINEAR,
-        )?;
+        // Reuse existing objects instead of creating new ones
+        self.scaler.run(frame, &mut self.yuv_frame)?;
 
-        scaler.run(frame, &mut yuv_frame)?;
+        // Clear and reuse buffer
+        self.frame_buffer.clear();
+        self.frame_buffer.extend_from_slice(self.yuv_frame.data(0));
 
-        let mut uv_plane = Vec::with_capacity(yuv_frame.data(1).len() * 2);
-        for (u, v) in yuv_frame.data(1).iter().zip(yuv_frame.data(2).iter()) {
-            uv_plane.push(*u);
-            uv_plane.push(*v);
+        // Process UV planes
+        for (u, v) in self
+            .yuv_frame
+            .data(1)
+            .iter()
+            .zip(self.yuv_frame.data(2).iter())
+        {
+            self.frame_buffer.push(*u);
+            self.frame_buffer.push(*v);
         }
 
-        Ok([yuv_frame.data(0).to_vec(), uv_plane].concat())
+        Ok(self.frame_buffer.clone()) // Only clone at the end
     }
 
     fn add_frame_to_queue(&mut self, frame: ffmpeg::frame::Video) -> Result<(), VideoError> {
