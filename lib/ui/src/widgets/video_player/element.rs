@@ -81,10 +81,10 @@ impl Player {
 
     pub fn view(&self) -> Element<Event> {
         let is_playing = self.stream.borrow().is_playing;
-        let total_frames = self.stream.borrow().total_frames();
+        let total_frames = self.stream.borrow().total_frames().unwrap();
         let is_looping = self.stream.borrow().looping();
         let current = self.stream.borrow().current_time();
-        let total = self.stream.borrow().total_time();
+        let total = self.stream.borrow().total_time().unwrap();
 
         Column::new()
             .push(
@@ -275,7 +275,7 @@ where
                     shell.publish(message.clone());
                 }
                 // Check for end of video
-                if video.current_frame() >= video.end_frame() {
+                if video.current_frame() >= video.end_frame().unwrap() {
                     if let Some(ref message) = self.on_end_of_stream {
                         shell.publish(message.clone());
                     }

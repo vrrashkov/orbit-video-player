@@ -19,6 +19,9 @@ pub enum VideoError {
     #[error("Invalid window size")]
     InvalidWindowSize,
 
+    #[error("Invalid timestamp")]
+    InvalidTimestamp,
+
     #[error("Stream not found: {0}")]
     StreamNotFound(&'static str),
 }
