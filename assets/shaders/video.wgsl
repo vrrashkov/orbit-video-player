@@ -20,6 +20,30 @@ var s: sampler;
 @group(0) @binding(3)
 var<uniform> uniforms: Uniforms;
 
+fn convert_yuv_bt709(y: f32, u: f32, v: f32) -> vec3<f32> {
+    let y_range = (y - 16.0/255.0) * (255.0/219.0);
+    let u_range = (u - 128.0/255.0) * (255.0/224.0);
+    let v_range = (v - 128.0/255.0) * (255.0/224.0);
+    
+    return vec3<f32>(
+        y_range + 1.5748 * v_range,
+        y_range - 0.1873 * u_range - 0.4681 * v_range,
+        y_range + 1.8556 * u_range
+    );
+}
+
+fn convert_yuv_bt601(y: f32, u: f32, v: f32) -> vec3<f32> {
+    let y_range = (y - 16.0/255.0) * (255.0/219.0);
+    let u_range = (u - 128.0/255.0) * (255.0/224.0);
+    let v_range = (v - 128.0/255.0) * (255.0/224.0);
+    
+    return vec3<f32>(
+        y_range + 1.402 * v_range,
+        y_range - 0.344 * u_range - 0.714 * v_range,
+        y_range + 1.772 * u_range
+    );
+}
+
 @vertex
 fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
     var quad = array<vec4<f32>, 6>(
@@ -36,28 +60,24 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
     out.position = vec4<f32>(quad[in_vertex_index].xy, 1.0, 1.0);
     return out;
 }
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Sample Y and UV planes
     let y = textureSample(tex_y, s, in.uv).r;
     let uv = textureSample(tex_uv, s, in.uv).rg;
     
-    // YUV is in MPEG range (limited)
-    let y_range = (y - 16.0/255.0) * (255.0/219.0);
+    var rgb: vec3<f32>;
+    switch uniforms.color_space {
+        case 0u: { // BT.709
+            rgb = convert_yuv_bt709(y, uv.r, uv.g);
+        }
+        case 1u: { // BT.601
+            rgb = convert_yuv_bt601(y, uv.r, uv.g);
+        }
+        default: { // Fallback to BT.709
+            rgb = convert_yuv_bt709(y, uv.r, uv.g);
+        }
+    }
     
-    // UV values are packed in RG channels, need to recenter around 0
-    let u = (uv.r - 128.0/255.0) * (255.0/224.0);
-    let v = (uv.g - 128.0/255.0) * (255.0/224.0);
-
-    // BT.709 matrix (standard HDTV)
-    let r = y_range + 1.5748 * v;
-    let g = y_range - 0.1873 * u - 0.4681 * v;
-    let b = y_range + 1.8556 * u;
-    
-    return vec4<f32>(
-        clamp(r, 0.0, 1.0),
-        clamp(g, 0.0, 1.0),
-        clamp(b, 0.0, 1.0),
-        1.0
-    );
+    return vec4<f32>(clamp(rgb, vec3(0.0), vec3(1.0)), 1.0);
 }

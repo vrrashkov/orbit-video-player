@@ -400,9 +400,14 @@ impl VideoStream {
     }
     pub fn total_time(&self) -> Result<Duration, VideoError> {
         let video_stream = self.get_video_stream()?;
+        let raw_duration = video_stream.duration();
+        let time_base = video_stream.time_base();
 
-        let duration = video_stream.duration() as f64 * f64::from(video_stream.time_base());
-        Ok(Duration::from_secs_f64(duration))
+        // More precise calculation
+        let seconds =
+            (raw_duration * time_base.numerator() as i64) as f64 / time_base.denominator() as f64;
+
+        Ok(Duration::from_secs_f64(seconds))
     }
 
     pub fn seek_to_time(&mut self, time_s: f64) -> Result<(), VideoError> {
@@ -460,9 +465,8 @@ impl VideoStream {
     }
     pub fn total_frames(&self) -> Result<u64, VideoError> {
         let video_stream = self.get_video_stream()?;
-
         let duration = video_stream.duration() as f64 * f64::from(video_stream.time_base());
-        Ok((duration * self.get_fps()).ceil() as u64)
+        Ok((duration * self.get_fps()).ceil() as u64) // This rounding could cause small differences
     }
 
     pub fn get_fps(&self) -> f64 {

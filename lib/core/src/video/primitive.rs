@@ -6,11 +6,17 @@ use std::{
     num::NonZero,
     sync::atomic::{AtomicUsize, Ordering},
 };
+
+use super::color_space::BT709_CONFIG;
+
 #[repr(C)]
 struct Uniforms {
     rect: [f32; 4],
     color_space: [u32; 1],
-    _pad: [u8; 240],
+    y_range: [f32; 2],     // min, max for Y
+    uv_range: [f32; 2],    // min, max for UV
+    matrix: [[f32; 3]; 3], // Color conversion matrix
+    _pad: [u8; 188],       // Adjusted padding to maintain size
 }
 
 struct VideoEntry {
@@ -316,6 +322,11 @@ impl VideoPipeline {
         color_space: Space,
     ) {
         if let Some(video) = self.videos.get_mut(&video_id) {
+            let config = match color_space {
+                Space::BT709 => BT709_CONFIG,
+                _ => BT709_CONFIG,
+            };
+
             let uniforms = Uniforms {
                 rect: [
                     bounds.x,
@@ -324,7 +335,10 @@ impl VideoPipeline {
                     bounds.y + bounds.height,
                 ],
                 color_space: [color_space as u32],
-                _pad: [0; 240],
+                y_range: config.y_range,
+                uv_range: config.uv_range,
+                matrix: config.matrix,
+                _pad: [0; 188],
             };
             queue.write_buffer(
                 &video.instances,

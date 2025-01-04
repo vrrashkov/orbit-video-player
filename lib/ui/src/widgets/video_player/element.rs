@@ -72,8 +72,10 @@ impl Player {
             Event::NewFrame => {
                 if !self.dragging {
                     let current = self.stream.borrow().current_time().as_secs_f64();
-                    tracing::info!("Current frame: {}", current);
-                    self.position = current;
+                    // Only update if the difference is significant
+                    if (self.position - current).abs() > 0.001 {
+                        self.position = current;
+                    }
                 }
             }
         }
@@ -104,7 +106,7 @@ impl Player {
             .push(
                 Container::new(
                     Slider::new(0.0..=total.as_secs_f64(), self.position, Event::Seek)
-                        .step(0.1)
+                        .step(0.001)
                         .on_release(Event::SeekRelease),
                 )
                 .padding(iced::Padding::new(5.0).left(10.0).right(10.0)),
@@ -131,10 +133,10 @@ impl Player {
                     .push(
                         Text::new(format!(
                             "{:02}:{:02} / {:02}:{:02}",
-                            current.as_secs() / 60,
-                            current.as_secs() % 60,
-                            total.as_secs() / 60,
-                            total.as_secs() % 60,
+                            (current.as_secs_f64() / 60.0).floor() as u64,
+                            (current.as_secs_f64() % 60.0).ceil() as u64, // ceil() for rounding up
+                            (total.as_secs_f64() / 60.0).floor() as u64,
+                            (total.as_secs_f64() % 60.0).ceil() as u64 // ceil() for rounding up
                         ))
                         .width(iced::Length::Fill)
                         .align_x(iced::alignment::Horizontal::Right),
