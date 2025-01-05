@@ -34,6 +34,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 thiserror = "2.0.9"
 tokio = { version = "1", features = ["full"] }
+bon = "3.3.2"
 # LOCAL
 nebula-common = { path = "lib/common" }
 nebula-core = { path = "lib/core" }
