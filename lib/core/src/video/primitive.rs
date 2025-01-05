@@ -485,19 +485,22 @@ impl VideoPipeline {
                 _ => BT709_CONFIG,
             };
 
+            let rect = [
+                bounds.x,
+                bounds.y,
+                bounds.x + bounds.width,
+                bounds.y + bounds.height,
+            ];
+
             let uniforms = Uniforms {
-                rect: [
-                    bounds.x,
-                    bounds.y,
-                    bounds.x + bounds.width,
-                    bounds.y + bounds.height,
-                ],
+                rect: rect,
                 color_space: [color_space as u32],
                 y_range: config.y_range,
                 uv_range: config.uv_range,
                 matrix: config.matrix,
                 _pad: [0; 188],
             };
+            dbg!("rect", &rect);
             queue.write_buffer(
                 &video.instances,
                 (video.prepare_index.load(Ordering::Relaxed) * std::mem::size_of::<Uniforms>())
@@ -611,8 +614,6 @@ impl VideoPipeline {
         let extent = video.texture_y.size();
         let x = clip.x.min(extent.width);
         let y = clip.y.min(extent.height);
-        let width = (clip.width).min(extent.width - x);
-        let height = (clip.height).min(extent.height - y);
 
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(
@@ -623,7 +624,8 @@ impl VideoPipeline {
                     as u32,
             ],
         );
-        pass.set_scissor_rect(x, y, width, height);
+
+        pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
         pass.draw(0..6, 0..1);
 
         video.prepare_index.store(0, Ordering::Relaxed);
@@ -652,11 +654,7 @@ impl VideoPipeline {
             occlusion_query_set: None,
         });
 
-        let extent = video.texture_y.size();
-        let x = clip.x.min(extent.width);
-        let y = clip.y.min(extent.height);
-        let width = (clip.width).min(extent.width - x);
-        let height = (clip.height).min(extent.height - y);
+        let target_size = video.texture_y.size();
 
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(
@@ -667,7 +665,7 @@ impl VideoPipeline {
                     as u32,
             ],
         );
-        pass.set_scissor_rect(x, y, width, height);
+        pass.set_scissor_rect(0, 0, target_size.width, target_size.height);
         pass.draw(0..6, 0..1);
 
         video.prepare_index.store(0, Ordering::Relaxed);
@@ -702,25 +700,13 @@ impl VideoPipeline {
             occlusion_query_set: None,
         });
 
-        let output_size = if let Some(video) = self.videos.values().next() {
-            let extent = video.texture_y.size();
-            (extent.width, extent.height)
-        } else {
-            (640, 360)
-        };
-
-        let x = clip.x.min(output_size.0);
-        let y = clip.y.min(output_size.1);
-        let width = (clip.width).min(output_size.0 - x);
-        let height = (clip.height).min(output_size.1 - y);
-
         pass.set_pipeline(&effect.pipeline);
         pass.set_bind_group(0, bind_group, &[]);
-        pass.set_scissor_rect(x, y, width, height);
+
+        pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
         pass.draw(0..6, 0..1);
     }
     fn resize_intermediate_textures(&mut self, device: &wgpu::Device, size: wgpu::Extent3d) {
-        // Destroy old textures
         for texture in self.intermediate_textures.drain(..) {
             texture.destroy();
         }
