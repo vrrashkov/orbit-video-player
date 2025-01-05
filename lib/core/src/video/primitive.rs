@@ -291,48 +291,6 @@ impl VideoPipeline {
             uniforms: uniforms_buffer,
         });
     }
-    fn apply_effect(
-        &self,
-        encoder: &mut wgpu::CommandEncoder,
-        effect: &ShaderEffect,
-        bind_group: &wgpu::BindGroup,
-        output: &wgpu::TextureView,
-        clip: &iced::Rectangle<u32>,
-    ) {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("effect_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: output,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-
-        // Get the dimensions of the output texture
-        let output_size = if let Some(video) = self.videos.values().next() {
-            let extent = video.texture_y.size();
-            (extent.width, extent.height)
-        } else {
-            (640, 360) // Default size
-        };
-
-        // Clamp scissor rect to output dimensions
-        let x = clip.x.min(output_size.0);
-        let y = clip.y.min(output_size.1);
-        let width = (clip.width).min(output_size.0 - x);
-        let height = (clip.height).min(output_size.1 - y);
-
-        pass.set_pipeline(&effect.pipeline);
-        pass.set_bind_group(0, bind_group, &[]);
-        pass.set_scissor_rect(x, y, width, height);
-        pass.draw(0..6, 0..1);
-    }
     fn upload(
         &mut self,
         device: &wgpu::Device,
@@ -596,7 +554,6 @@ impl VideoPipeline {
                 return;
             }
 
-            // Check if we have necessary resources
             if self.intermediate_textures.len() <= self.effects.len()
                 || self.effect_bind_groups.len() != self.effects.len()
             {
@@ -606,30 +563,27 @@ impl VideoPipeline {
 
             // First render video to first intermediate texture
             let first_view = self.intermediate_textures[0].create_view(&Default::default());
-            self.draw_video_pass(&first_view, encoder, clip, &video);
+            self.draw_video_pass_clear(&first_view, encoder, clip, &video);
 
-            // Apply each effect in sequence
-            for (i, effect) in self.effects.iter().enumerate() {
-                let output = if i == self.effects.len() - 1 {
-                    target
-                } else {
-                    &self.intermediate_textures[i + 1].create_view(&Default::default())
-                };
-
-                self.apply_effect(encoder, effect, &self.effect_bind_groups[i], output, clip);
+            // Apply effects to intermediate textures
+            for (i, effect) in self.effects.iter().enumerate().take(self.effects.len() - 1) {
+                let output = &self.intermediate_textures[i + 1].create_view(&Default::default());
+                self.apply_effect(
+                    encoder,
+                    effect,
+                    &self.effect_bind_groups[i],
+                    output,
+                    clip,
+                    true,
+                );
             }
-        }
-    }
-    fn resize_intermediate_textures(&mut self, device: &wgpu::Device, size: wgpu::Extent3d) {
-        // Destroy old textures
-        for texture in self.intermediate_textures.drain(..) {
-            texture.destroy();
-        }
 
-        // Create new textures with updated size
-        for _ in 0..=self.effects.len() {
-            self.intermediate_textures
-                .push(self.create_intermediate_texture(device, size));
+            // Final draw to target - preserve existing content
+            if let Some((last_effect, last_bind_group)) =
+                self.effects.last().zip(self.effect_bind_groups.last())
+            {
+                self.apply_effect(encoder, last_effect, last_bind_group, target, clip, false);
+            }
         }
     }
     fn draw_video_pass(
@@ -654,10 +608,7 @@ impl VideoPipeline {
             occlusion_query_set: None,
         });
 
-        // Get the dimensions of the video texture
         let extent = video.texture_y.size();
-
-        // Clamp scissor rect to texture dimensions
         let x = clip.x.min(extent.width);
         let y = clip.y.min(extent.height);
         let width = (clip.width).min(extent.width - x);
@@ -677,6 +628,108 @@ impl VideoPipeline {
 
         video.prepare_index.store(0, Ordering::Relaxed);
         video.render_index.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn draw_video_pass_clear(
+        &self,
+        target: &wgpu::TextureView,
+        encoder: &mut wgpu::CommandEncoder,
+        clip: &iced::Rectangle<u32>,
+        video: &VideoEntry,
+    ) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("video render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        let extent = video.texture_y.size();
+        let x = clip.x.min(extent.width);
+        let y = clip.y.min(extent.height);
+        let width = (clip.width).min(extent.width - x);
+        let height = (clip.height).min(extent.height - y);
+
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(
+            0,
+            &video.bg0,
+            &[
+                (video.render_index.load(Ordering::Relaxed) * std::mem::size_of::<Uniforms>())
+                    as u32,
+            ],
+        );
+        pass.set_scissor_rect(x, y, width, height);
+        pass.draw(0..6, 0..1);
+
+        video.prepare_index.store(0, Ordering::Relaxed);
+        video.render_index.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn apply_effect(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        effect: &ShaderEffect,
+        bind_group: &wgpu::BindGroup,
+        output: &wgpu::TextureView,
+        clip: &iced::Rectangle<u32>,
+        clear: bool,
+    ) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("effect_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: output,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: if clear {
+                        wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
+                    } else {
+                        wgpu::LoadOp::Load
+                    },
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+
+        let output_size = if let Some(video) = self.videos.values().next() {
+            let extent = video.texture_y.size();
+            (extent.width, extent.height)
+        } else {
+            (640, 360)
+        };
+
+        let x = clip.x.min(output_size.0);
+        let y = clip.y.min(output_size.1);
+        let width = (clip.width).min(output_size.0 - x);
+        let height = (clip.height).min(output_size.1 - y);
+
+        pass.set_pipeline(&effect.pipeline);
+        pass.set_bind_group(0, bind_group, &[]);
+        pass.set_scissor_rect(x, y, width, height);
+        pass.draw(0..6, 0..1);
+    }
+    fn resize_intermediate_textures(&mut self, device: &wgpu::Device, size: wgpu::Extent3d) {
+        // Destroy old textures
+        for texture in self.intermediate_textures.drain(..) {
+            texture.destroy();
+        }
+
+        // Create new textures with updated size
+        for _ in 0..=self.effects.len() {
+            self.intermediate_textures
+                .push(self.create_intermediate_texture(device, size));
+        }
     }
 }
 
