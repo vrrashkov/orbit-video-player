@@ -7,6 +7,7 @@ use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
 fn main() -> iced::Result {
+    env_logger::init();
     let subscriber = FmtSubscriber::builder()
         .with_max_level(Level::DEBUG)
         .finish();

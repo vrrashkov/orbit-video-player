@@ -14,6 +14,7 @@ winit.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+env_logger.workspace = true 
 # LOCAL
 nebula-common.workspace = true
 nebula-ui.workspace = true
@@ -21,6 +22,7 @@ nebula-core.workspace = true
 
 [workspace.dependencies]
 anyhow = "1.0"
+env_logger = "0.10"
 iced = {version="0.13.1", features = ["advanced"]}
 iced_wgpu = "0.13.5"
 wgpu = "23.0"
