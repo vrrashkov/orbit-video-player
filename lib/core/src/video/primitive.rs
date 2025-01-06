@@ -17,6 +17,9 @@ pub struct VideoPrimitive {
     size: (u32, u32),
     upload_frame: bool,
     color_space: Space,
+    // Add new fields
+    comparison_enabled: bool,
+    comparison_position: f32,
 }
 
 impl VideoPrimitive {
@@ -35,7 +38,19 @@ impl VideoPrimitive {
             size,
             upload_frame,
             color_space,
+            comparison_enabled: false,
+            comparison_position: 0.5,
         }
+    }
+    // Add methods to control comparison
+    pub fn with_comparison(mut self, enabled: bool) -> Self {
+        self.comparison_enabled = enabled;
+        self
+    }
+
+    pub fn with_comparison_position(mut self, position: f32) -> Self {
+        self.comparison_position = position.clamp(0.0, 1.0);
+        self
     }
 }
 
@@ -53,11 +68,11 @@ impl Primitive for VideoPrimitive {
             let mut video_pipeline = VideoPipeline::new(device, format);
 
             // Add effects
-            // video_pipeline.add_effect(
-            //     device,
-            //     include_str!("../../../../assets/shaders/grayscale.wgsl").into(),
-            //     None,
-            // );
+            video_pipeline.add_effect(
+                device,
+                include_str!("../../../../assets/shaders/grayscale.wgsl").into(),
+                None,
+            );
             storage.store(video_pipeline);
         }
 
@@ -73,6 +88,8 @@ impl Primitive for VideoPrimitive {
                 self.frame.as_slice(),
             );
         }
+        pipeline.set_comparison_enabled(self.comparison_enabled);
+        pipeline.set_comparison_position(self.comparison_position);
 
         pipeline.prepare(
             device,

@@ -43,20 +43,17 @@ impl RenderPasses {
         });
 
         pass.set_pipeline(&pipeline);
-        pass.set_bind_group(
-            0,
-            &video.bg0,
-            &[
-                (video.render_index.load(Ordering::Relaxed) * std::mem::size_of::<Uniforms>())
-                    as u32,
-            ],
-        );
 
-        // TODO check if this is necessary
+        let offset = video.render_index.load(Ordering::Relaxed) * video.aligned_uniform_size;
+
+        pass.set_bind_group(0, &video.bg0, &[offset as u32]);
+
+        // // TODO check if this is necessary
         if load_op == wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) {
-            let target_size = video.texture_y.size();
-            pass.set_scissor_rect(0, 0, target_size.width, target_size.height);
+            let video_size = video.texture_y.size();
+            pass.set_scissor_rect(0, 0, video_size.width, video_size.height);
         } else {
+            // For final render to target, use UI coordinates
             pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
         }
         pass.draw(0..6, 0..1);
@@ -94,8 +91,11 @@ impl RenderPasses {
 
         pass.set_pipeline(&effect.pipeline);
         pass.set_bind_group(0, bind_group, &[]);
-
-        pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
+        if clear {
+            pass.set_scissor_rect(0, 0, clip.width, clip.height);
+        } else {
+            pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
+        }
         pass.draw(0..6, 0..1);
     }
 }

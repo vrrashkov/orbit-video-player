@@ -17,6 +17,10 @@ pub struct Player {
     stream: RefCell<VideoStream>,
     position: f64,
     dragging: bool,
+    // Comparison
+    comparison_enabled: bool,
+    comparison_position: f32,
+    dragging_comparison: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -27,6 +31,11 @@ pub enum Event {
     SeekRelease,
     EndOfStream,
     NewFrame,
+    // Comparison
+    ToggleComparison,
+    UpdateComparisonPosition(f32),
+    ComparisonDragStart,
+    ComparisonDragEnd,
 }
 
 impl Player {
@@ -35,6 +44,10 @@ impl Player {
             stream,
             position,
             dragging,
+            // Comparison
+            comparison_enabled: false,
+            comparison_position: 0.5, // Start at middle
+            dragging_comparison: false,
         }
     }
     pub fn update(&mut self, message: Event) {
@@ -78,6 +91,19 @@ impl Player {
                     }
                 }
             }
+            // Comparison
+            Event::ToggleComparison => {
+                self.comparison_enabled = !self.comparison_enabled;
+            }
+            Event::UpdateComparisonPosition(pos) => {
+                self.comparison_position = pos.clamp(0.0, 1.0);
+            }
+            Event::ComparisonDragStart => {
+                self.dragging_comparison = true;
+            }
+            Event::ComparisonDragEnd => {
+                self.dragging_comparison = false;
+            }
         }
     }
 
@@ -95,6 +121,13 @@ impl Player {
                         .width(iced::Length::Fill)
                         .height(iced::Length::Fill)
                         .content_fit(iced::ContentFit::Contain)
+                        .comparison_enabled(self.comparison_enabled)
+                        .comparison_position(self.comparison_position)
+                        .on_comparison_drag_start(Event::ComparisonDragStart)
+                        .on_comparison_drag_end(Event::ComparisonDragEnd)
+                        .on_comparison_position_change(Event::UpdateComparisonPosition(
+                            self.comparison_position,
+                        ))
                         .on_end_of_stream(Event::EndOfStream)
                         .on_new_frame(Event::NewFrame),
                 )
@@ -110,6 +143,15 @@ impl Player {
                         .on_release(Event::SeekRelease),
                 )
                 .padding(iced::Padding::new(5.0).left(10.0).right(10.0)),
+            )
+            .push(
+                Button::new(Text::new(if self.comparison_enabled {
+                    "Disable Comparison"
+                } else {
+                    "Enable Comparison"
+                }))
+                .width(120.0)
+                .on_press(Event::ToggleComparison),
             )
             .push(
                 Row::new()
@@ -240,7 +282,9 @@ where
                 (image_size.width as _, image_size.height as _),
                 true, // Always create new texture
                 video.color_space,
-            );
+            )
+            .with_comparison(self.comparison_enabled)
+            .with_comparison_position(self.comparison_position);
 
             let render = |renderer: &mut Renderer| {
                 renderer.draw_primitive(drawing_bounds, primitive.clone());
@@ -258,8 +302,8 @@ where
         &mut self,
         _state: &mut widget::Tree,
         event: iced::Event,
-        _layout: advanced::Layout<'_>,
-        _cursor: advanced::mouse::Cursor,
+        layout: advanced::Layout<'_>,
+        cursor: advanced::mouse::Cursor,
         _renderer: &Renderer,
         _clipboard: &mut dyn advanced::Clipboard,
         shell: &mut advanced::Shell<'_, Message>,
@@ -293,6 +337,47 @@ where
                 ));
             }
             Status::Captured
+        } else if let iced::Event::Mouse(mouse_event) = event {
+            let bounds = layout.bounds();
+
+            // Only handle mouse events if comparison is enabled
+            if self.comparison_enabled {
+                let split_x = bounds.x + (bounds.width * self.comparison_position);
+
+                match mouse_event {
+                    iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left) => {
+                        if let Some(position) = cursor.position() {
+                            // Check if click is near the comparison line (within 10 pixels)
+                            if (position.x - split_x).abs() < 10.0 {
+                                if let Some(ref message) = self.on_comparison_drag_start {
+                                    shell.publish(message.clone());
+                                }
+                                return Status::Captured;
+                            }
+                        }
+                    }
+                    iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left) => {
+                        if let Some(ref message) = self.on_comparison_drag_end {
+                            shell.publish(message.clone());
+                        }
+                        return Status::Captured;
+                    }
+                    iced::mouse::Event::CursorMoved { position } => {
+                        if self.dragging_comparison {
+                            let new_position =
+                                ((position.x - bounds.x) / bounds.width).clamp(0.0, 1.0);
+
+                            if let Some(ref message) = self.on_comparison_position_change {
+                                shell.publish(message.clone());
+                            }
+                            return Status::Captured;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            return Status::Ignored;
         } else {
             Status::Ignored
         }

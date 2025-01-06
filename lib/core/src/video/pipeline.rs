@@ -31,6 +31,7 @@ pub struct VideoEntry {
 
     pub prepare_index: AtomicUsize,
     pub render_index: AtomicUsize,
+    pub aligned_uniform_size: usize, // Add this field
 }
 
 pub struct VideoPipeline {
@@ -41,6 +42,9 @@ pub struct VideoPipeline {
     effects: EffectChain,
     texture_manager: TextureManager,
     format: wgpu::TextureFormat,
+    comparison_enabled: bool,
+    comparison_position: f32, // 0.0 to 1.0
+    line_pipeline: Option<wgpu::RenderPipeline>,
 }
 
 impl VideoPipeline {
@@ -128,7 +132,7 @@ impl VideoPipeline {
         });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("iced_video_player sampler"),
+            label: Some("video sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -142,7 +146,19 @@ impl VideoPipeline {
             border_color: None,
         });
 
-        VideoPipeline {
+        let uniform_alignment = device.limits().min_uniform_buffer_offset_alignment as usize;
+        let uniform_size = std::mem::size_of::<Uniforms>();
+        let aligned_uniform_size =
+            (uniform_size + uniform_alignment - 1) & !(uniform_alignment - 1);
+
+        let instances = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("video uniform buffer"),
+            size: (256 * aligned_uniform_size) as u64, // Use aligned size
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        });
+
+        let mut video_pipeline = VideoPipeline {
             pipeline,
             bg0_layout,
             sampler,
@@ -150,7 +166,14 @@ impl VideoPipeline {
             effects: EffectChain::new(),
             texture_manager: TextureManager::new(format),
             format,
-        }
+            comparison_enabled: false,
+            comparison_position: 0.5,
+            line_pipeline: None,
+        };
+
+        video_pipeline.line_pipeline = Some(video_pipeline.create_line_pipeline(device));
+
+        video_pipeline
     }
     fn create_intermediate_texture(
         &self,
@@ -168,7 +191,102 @@ impl VideoPipeline {
             view_formats: &[],
         })
     }
+    pub fn set_comparison_enabled(&mut self, enabled: bool) {
+        self.comparison_enabled = enabled;
+    }
 
+    pub fn set_comparison_position(&mut self, position: f32) {
+        self.comparison_position = position.clamp(0.0, 1.0);
+    }
+    // Add this new method to create a line shader pipeline
+    fn create_line_pipeline(&self, device: &wgpu::Device) -> wgpu::RenderPipeline {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("line_shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("../../../../assets/shaders/split_line.wgsl").into(),
+            ),
+        });
+
+        // Create uniform buffer layout for line position
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("line_bind_group_layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("line_pipeline_layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("line_pipeline"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        })
+    }
+
+    fn draw_comparison_line(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        x: f32,
+        clip: &iced::Rectangle<u32>,
+    ) {
+        if let Some(line_pipeline) = &self.line_pipeline {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("comparison_line"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            pass.set_pipeline(line_pipeline);
+            pass.draw(0..6, 0..1);
+        }
+    }
     pub fn add_effect(
         &mut self,
         device: &wgpu::Device,
@@ -206,13 +324,34 @@ impl VideoPipeline {
             }
         };
 
+        // Debug print the current state before resizing
+        println!("Before resize - Effects len: {}", self.effects.len());
+        println!("Texture size: {:?}", texture_size);
+
+        // Add 1 to ensure enough intermediate textures for each effect + final render
         self.texture_manager.resize_intermediate_textures(
             device,
             texture_size,
-            self.effects.len() + 1,
+            self.effects.len() + 1, // Ensure this creates enough textures
+        );
+
+        // Debug print after resize
+        println!(
+            "After resize - Intermediate textures: {}",
+            self.texture_manager.intermediate_textures.len()
         );
 
         self.effects.add_effect(effect_builder);
+
+        // Force bind group recreation in prepare method
+        self.effects.clear_bind_groups();
+
+        // Debug print final state
+        println!("Final - Effects len: {}", self.effects.len());
+        println!(
+            "Final - Intermediate textures: {}",
+            self.texture_manager.intermediate_textures.len()
+        );
     }
 
     pub fn upload(
@@ -224,6 +363,11 @@ impl VideoPipeline {
         (width, height): (u32, u32),
         frame: &[u8],
     ) {
+        let uniform_alignment = device.limits().min_uniform_buffer_offset_alignment as usize;
+        let uniform_size = std::mem::size_of::<Uniforms>();
+        let aligned_uniform_size =
+            (uniform_size + uniform_alignment - 1) & !(uniform_alignment - 1);
+
         let is_new_video = !self.videos.contains_key(&video_id);
         if is_new_video {
             // If this is a new video, ensure we have the right number of intermediate textures
@@ -236,7 +380,7 @@ impl VideoPipeline {
         }
         if let Entry::Vacant(entry) = self.videos.entry(video_id) {
             let texture_y = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("iced_video_player texture"),
+                label: Some("video texture"),
                 size: wgpu::Extent3d {
                     width,
                     height,
@@ -251,7 +395,7 @@ impl VideoPipeline {
             });
 
             let texture_uv = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("iced_video_player texture"),
+                label: Some("video texture"),
                 size: wgpu::Extent3d {
                     width: width / 2,
                     height: height / 2,
@@ -266,7 +410,7 @@ impl VideoPipeline {
             });
 
             let view_y = texture_y.create_view(&wgpu::TextureViewDescriptor {
-                label: Some("iced_video_player texture view"),
+                label: Some("video texture view"),
                 format: None,
                 dimension: None,
                 aspect: wgpu::TextureAspect::All,
@@ -277,7 +421,7 @@ impl VideoPipeline {
             });
 
             let view_uv = texture_uv.create_view(&wgpu::TextureViewDescriptor {
-                label: Some("iced_video_player texture view"),
+                label: Some("video texture view"),
                 format: None,
                 dimension: None,
                 aspect: wgpu::TextureAspect::All,
@@ -288,14 +432,14 @@ impl VideoPipeline {
             });
 
             let instances = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("iced_video_player uniform buffer"),
-                size: 256 * std::mem::size_of::<Uniforms>() as u64, // max 256 video players per frame
+                label: Some("video uniform buffer"),
+                size: (256 * aligned_uniform_size) as u64, // Use aligned size
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
                 mapped_at_creation: false,
             });
 
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("iced_video_player bind group"),
+                label: Some("video bind group"),
                 layout: &self.bg0_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
@@ -330,6 +474,7 @@ impl VideoPipeline {
 
                 prepare_index: AtomicUsize::new(0),
                 render_index: AtomicUsize::new(0),
+                aligned_uniform_size, // Add this
             });
         }
 
@@ -436,6 +581,20 @@ impl VideoPipeline {
                     )
                 },
             );
+            // Calculate aligned offset
+            let uniform_alignment = device.limits().min_uniform_buffer_offset_alignment as usize;
+            let uniform_size = std::mem::size_of::<Uniforms>();
+            let aligned_uniform_size =
+                (uniform_size + uniform_alignment - 1) & !(uniform_alignment - 1);
+            let offset = video.prepare_index.load(Ordering::Relaxed) * aligned_uniform_size;
+
+            queue.write_buffer(&video.instances, offset as u64, unsafe {
+                std::slice::from_raw_parts(
+                    &uniforms as *const _ as *const u8,
+                    std::mem::size_of::<Uniforms>(),
+                )
+            });
+
             video.prepare_index.fetch_add(1, Ordering::Relaxed);
             video.render_index.store(0, Ordering::Relaxed);
         }
@@ -482,51 +641,143 @@ impl VideoPipeline {
         video_id: u64,
     ) {
         if let Some(video) = self.videos.get(&video_id) {
-            if self.effects.is_empty() {
-                self.draw_video_pass(target, encoder, clip, &video);
-                return;
-            }
+            // Debug prints to understand the state
+            println!("Comparison Enabled: {}", self.comparison_enabled);
+            println!("Effects Empty: {}", self.effects.is_empty());
+            println!(
+                "Intermediate Textures: {}",
+                self.texture_manager.intermediate_textures.len()
+            );
+            println!("Bind Groups: {}", self.effects.bind_groups.len());
 
-            if self.texture_manager.intermediate_textures.len() <= self.effects.len()
-                || self.effects.bind_groups.len() != self.effects.len()
-            {
-                self.draw_video_pass(target, encoder, clip, &video);
-                return;
-            }
+            if !self.comparison_enabled || self.effects.is_empty() {
+                // Single video rendering logic
+                if self.effects.is_empty() {
+                    self.draw_video_pass(target, encoder, clip, &video);
+                    return;
+                }
 
-            // First render video to first intermediate texture
-            let first_view =
-                self.texture_manager.intermediate_textures[0].create_view(&Default::default());
-            self.draw_video_pass_clear(&first_view, encoder, clip, &video);
+                if self.texture_manager.intermediate_textures.len() <= self.effects.len()
+                    || self.effects.bind_groups.len() != self.effects.len()
+                {
+                    self.draw_video_pass(target, encoder, clip, &video);
+                    return;
+                }
 
-            // Apply effects to intermediate textures
-            for (i, effect) in self
-                .effects
-                .effects
-                .iter()
-                .enumerate()
-                .take(self.effects.len() - 1)
-            {
-                let output = &self.texture_manager.intermediate_textures[i + 1]
-                    .create_view(&Default::default());
-                self.apply_effect(
-                    encoder,
-                    effect,
-                    &self.effects.bind_groups[i],
-                    output,
-                    clip,
-                    true,
-                );
-            }
+                // Existing single video with effects logic
+                let first_view =
+                    self.texture_manager.intermediate_textures[0].create_view(&Default::default());
+                self.draw_video_pass_clear(&first_view, encoder, clip, &video);
 
-            // Final draw to target - preserve existing content
-            if let Some((last_effect, last_bind_group)) = self
-                .effects
-                .effects
-                .last()
-                .zip(self.effects.bind_groups.last())
-            {
-                self.apply_effect(encoder, last_effect, last_bind_group, target, clip, false);
+                for (i, effect) in self
+                    .effects
+                    .effects
+                    .iter()
+                    .enumerate()
+                    .take(self.effects.len() - 1)
+                {
+                    let output = &self.texture_manager.intermediate_textures[i + 1]
+                        .create_view(&Default::default());
+                    self.apply_effect(
+                        encoder,
+                        effect,
+                        &self.effects.bind_groups[i],
+                        output,
+                        clip,
+                        true,
+                    );
+                }
+
+                if let Some((last_effect, last_bind_group)) = self
+                    .effects
+                    .effects
+                    .last()
+                    .zip(self.effects.bind_groups.last())
+                {
+                    self.apply_effect(encoder, last_effect, last_bind_group, target, clip, false);
+                }
+            } else {
+                // Comparison mode
+                let split_x = clip.x + (clip.width as f32 * self.comparison_position) as u32;
+                let video_size = video.texture_y.size();
+
+                // Ensure enough intermediate textures
+                if self.texture_manager.intermediate_textures.len() < self.effects.len() + 1 {
+                    println!("Not enough intermediate textures for comparison!");
+                    return;
+                }
+
+                // Left side (original video)
+                let left_clip = iced::Rectangle {
+                    x: clip.x,
+                    y: clip.y,
+                    width: split_x - clip.x,
+                    height: clip.height,
+                };
+                self.draw_video_pass(target, encoder, &left_clip, video);
+
+                // Right side (effected video)
+                if !self.effects.is_empty() {
+                    // Full video source dimensions
+                    let source_clip = iced::Rectangle {
+                        x: 0,
+                        y: 0,
+                        width: video_size.width,
+                        height: video_size.height,
+                    };
+
+                    // Calculate scaling factors
+                    let x_scale = (clip.width / 2) as f32 / video_size.width as f32;
+                    let y_scale = clip.height as f32 / video_size.height as f32;
+                    let scale = x_scale.min(y_scale);
+
+                    // Scaled video dimensions
+                    let scaled_width = (video_size.width as f32 * scale) as u32;
+
+                    // Right clip calculation
+                    let right_clip = iced::Rectangle {
+                        x: split_x,
+                        y: clip.y,
+                        width: scaled_width,
+                        height: clip.height,
+                    };
+
+                    // Prepare intermediate textures
+                    let first_view = self.texture_manager.intermediate_textures[0]
+                        .create_view(&Default::default());
+                    self.draw_video_pass_clear(&first_view, encoder, &source_clip, video);
+
+                    // Apply effects to intermediate textures
+                    for (i, effect) in self.effects.effects.iter().enumerate() {
+                        let output = &self.texture_manager.intermediate_textures[i + 1]
+                            .create_view(&Default::default());
+                        self.apply_effect(
+                            encoder,
+                            effect,
+                            &self.effects.bind_groups[i],
+                            output,
+                            &source_clip,
+                            true,
+                        );
+                    }
+
+                    // Final draw of right side
+                    if let Some((last_effect, last_bind_group)) = self
+                        .effects
+                        .effects
+                        .last()
+                        .zip(self.effects.bind_groups.last())
+                    {
+                        self.apply_effect(
+                            encoder,
+                            last_effect,
+                            last_bind_group,
+                            target,
+                            &right_clip,
+                            false,
+                        );
+                    }
+                }
             }
         }
     }
@@ -549,11 +800,18 @@ impl VideoPipeline {
         clip: &iced::Rectangle<u32>,
         video: &VideoEntry,
     ) {
+        // let bounded_clip = iced::Rectangle {
+        //     x: clip.x,
+        //     y: clip.y,
+        //     width: clip.width.min(video.texture_y.size().width),
+        //     height: clip.height.min(video.texture_y.size().height),
+        // };
+
         RenderPasses::draw_video_pass(
             &self.pipeline,
             target,
             encoder,
-            clip,
+            &clip,
             video,
             wgpu::LoadOp::Load,
         );

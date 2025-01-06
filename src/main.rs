@@ -14,7 +14,7 @@ fn main() -> iced::Result {
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-    iced::run("Iced Video Player", App::update, App::view)
+    iced::run("Orbit Video Player", App::update, App::view)
 }
 
 pub struct App {
