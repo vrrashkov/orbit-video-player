@@ -7,6 +7,8 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use crate::video::shader_effect::ShaderUniforms;
+
 use super::{
     color_space::BT709_CONFIG, effect_chain::EffectChain, render_passes::RenderPasses,
     texture_manager::TextureManager, ShaderEffect,
@@ -290,23 +292,36 @@ impl VideoPipeline {
     pub fn add_effect(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         shader_source: &str,
-        uniforms: Option<&[u8]>,
+        // uniforms: Option<&[u8]>,
     ) {
-        let uniforms_buffer = uniforms.map(|data| {
-            device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("effect_uniforms"),
-                size: data.len() as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            })
+        // let uniform_buffer = uniforms.map(|data| {
+        //     device.create_buffer(&wgpu::BufferDescriptor {
+        //         label: Some("effect_uniforms"),
+        //         size: data.len() as u64,
+        //         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        //         mapped_at_creation: false,
+        //     })
+        // });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("shader_effect_uniforms"),
+            size: std::mem::size_of::<ShaderUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
+        let shader_uniforms = ShaderUniforms {
+            comparison_enabled: 0,
+            comparison_position: 0.5,
+            _pad: [0; 2],
+        };
+        queue.write_buffer(&uniform_buffer, 0, bytemuck::cast_slice(&[shader_uniforms]));
 
         let effect_builder = ShaderEffect::builder()
             .device(device)
             .shader_source(shader_source)
             .format(self.format)
-            .maybe_uniforms(uniforms_buffer)
+            .maybe_uniforms(Some(uniform_buffer))
             .build();
 
         let texture_size = if let Some(video) = self.videos.values().next() {
@@ -600,6 +615,24 @@ impl VideoPipeline {
         }
 
         self.effects.clear_bind_groups();
+
+        if !self.effects.is_empty() {
+            for effect in self.effects.effects() {
+                if let Some(uniforms_buffer) = &effect.uniforms {
+                    let shader_uniforms = ShaderUniforms {
+                        comparison_enabled: self.comparison_enabled as u32,
+                        comparison_position: self.comparison_position,
+                        _pad: [0; 2],
+                    };
+
+                    queue.write_buffer(
+                        uniforms_buffer,
+                        0,
+                        bytemuck::cast_slice(&[shader_uniforms]),
+                    );
+                }
+            }
+        }
         if !self.effects.is_empty() && self.texture_manager.len() > 0 {
             for i in 0..self.effects.len() {
                 let input = if i == 0 {
@@ -614,6 +647,7 @@ impl VideoPipeline {
                         .create_view(&Default::default())
                 };
 
+                let effect = &self.effects.effects()[i];
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("effect_bind_group"),
                     layout: &self.effects.effects()[i].bind_group_layout,
@@ -625,6 +659,17 @@ impl VideoPipeline {
                         wgpu::BindGroupEntry {
                             binding: 1,
                             resource: wgpu::BindingResource::Sampler(&self.sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer: effect.uniforms.as_ref().unwrap(),
+                                offset: 0,
+                                size: Some(
+                                    NonZero::new(std::mem::size_of::<ShaderUniforms>() as _)
+                                        .unwrap(),
+                                ),
+                            }),
                         },
                     ],
                 });
@@ -650,134 +695,50 @@ impl VideoPipeline {
             );
             println!("Bind Groups: {}", self.effects.bind_groups.len());
 
-            if !self.comparison_enabled || self.effects.is_empty() {
-                // Single video rendering logic
-                if self.effects.is_empty() {
-                    self.draw_video_pass(target, encoder, clip, &video);
-                    return;
-                }
+            // Single video rendering logic
+            if self.effects.is_empty() {
+                self.draw_video_pass(target, encoder, clip, &video);
+                return;
+            }
 
-                if self.texture_manager.intermediate_textures.len() <= self.effects.len()
-                    || self.effects.bind_groups.len() != self.effects.len()
-                {
-                    self.draw_video_pass(target, encoder, clip, &video);
-                    return;
-                }
+            if self.texture_manager.intermediate_textures.len() <= self.effects.len()
+                || self.effects.bind_groups.len() != self.effects.len()
+            {
+                self.draw_video_pass(target, encoder, clip, &video);
+                return;
+            }
 
-                // Existing single video with effects logic
-                let first_view =
-                    self.texture_manager.intermediate_textures[0].create_view(&Default::default());
-                self.draw_video_pass_clear(&first_view, encoder, clip, &video);
+            // Existing single video with effects logic
+            let first_view =
+                self.texture_manager.intermediate_textures[0].create_view(&Default::default());
+            self.draw_video_pass_clear(&first_view, encoder, clip, &video);
 
-                for (i, effect) in self
-                    .effects
-                    .effects
-                    .iter()
-                    .enumerate()
-                    .take(self.effects.len() - 1)
-                {
-                    let output = &self.texture_manager.intermediate_textures[i + 1]
-                        .create_view(&Default::default());
-                    self.apply_effect(
-                        encoder,
-                        effect,
-                        &self.effects.bind_groups[i],
-                        output,
-                        clip,
-                        true,
-                    );
-                }
+            for (i, effect) in self
+                .effects
+                .effects
+                .iter()
+                .enumerate()
+                .take(self.effects.len() - 1)
+            {
+                let output = &self.texture_manager.intermediate_textures[i + 1]
+                    .create_view(&Default::default());
+                self.apply_effect(
+                    encoder,
+                    effect,
+                    &self.effects.bind_groups[i],
+                    output,
+                    clip,
+                    true,
+                );
+            }
 
-                if let Some((last_effect, last_bind_group)) = self
-                    .effects
-                    .effects
-                    .last()
-                    .zip(self.effects.bind_groups.last())
-                {
-                    self.apply_effect(encoder, last_effect, last_bind_group, target, clip, false);
-                }
-            } else {
-                // Comparison mode
-                let split_x = clip.x + (clip.width as f32 * self.comparison_position) as u32;
-                let video_size = video.texture_y.size();
-
-                // Ensure enough intermediate textures
-                if self.texture_manager.intermediate_textures.len() < self.effects.len() + 1 {
-                    println!("Not enough intermediate textures for comparison!");
-                    return;
-                }
-
-                // Left side (original video)
-                let left_clip = iced::Rectangle {
-                    x: clip.x,
-                    y: clip.y,
-                    width: split_x - clip.x,
-                    height: clip.height,
-                };
-                self.draw_video_pass(target, encoder, &left_clip, video);
-
-                // Right side (effected video)
-                if !self.effects.is_empty() {
-                    // Full video source dimensions
-                    let source_clip = iced::Rectangle {
-                        x: 0,
-                        y: 0,
-                        width: video_size.width,
-                        height: video_size.height,
-                    };
-
-                    // Calculate scaling factors
-                    let x_scale = (clip.width / 2) as f32 / video_size.width as f32;
-                    let y_scale = clip.height as f32 / video_size.height as f32;
-                    let scale = x_scale.min(y_scale);
-
-                    // Scaled video dimensions
-                    let scaled_width = (video_size.width as f32 * scale) as u32;
-
-                    // Right clip calculation
-                    let right_clip = iced::Rectangle {
-                        x: split_x,
-                        y: clip.y,
-                        width: scaled_width,
-                        height: clip.height,
-                    };
-
-                    // Prepare intermediate textures
-                    let first_view = self.texture_manager.intermediate_textures[0]
-                        .create_view(&Default::default());
-                    self.draw_video_pass_clear(&first_view, encoder, &source_clip, video);
-
-                    // Apply effects to intermediate textures
-                    for (i, effect) in self.effects.effects.iter().enumerate() {
-                        let output = &self.texture_manager.intermediate_textures[i + 1]
-                            .create_view(&Default::default());
-                        self.apply_effect(
-                            encoder,
-                            effect,
-                            &self.effects.bind_groups[i],
-                            output,
-                            &source_clip,
-                            true,
-                        );
-                    }
-
-                    // Final draw of right side
-                    if let Some((last_effect, last_bind_group)) = self
-                        .effects
-                        .effects
-                        .last()
-                        .zip(self.effects.bind_groups.last())
-                    {
-                        self.apply_effect(
-                            encoder,
-                            last_effect,
-                            last_bind_group,
-                            target,
-                            &right_clip,
-                            false,
-                        );
-                    }
-                }
+            if let Some((last_effect, last_bind_group)) = self
+                .effects
+                .effects
+                .last()
+                .zip(self.effects.bind_groups.last())
+            {
+                self.apply_effect(encoder, last_effect, last_bind_group, target, clip, false);
             }
         }
     }

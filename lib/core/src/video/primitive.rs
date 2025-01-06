@@ -70,8 +70,9 @@ impl Primitive for VideoPrimitive {
             // Add effects
             video_pipeline.add_effect(
                 device,
+                queue,
                 include_str!("../../../../assets/shaders/grayscale.wgsl").into(),
-                None,
+                // None,
             );
             storage.store(video_pipeline);
         }

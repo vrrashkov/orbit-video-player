@@ -13,7 +13,13 @@ pub struct ShaderEffect {
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub uniforms: Option<wgpu::Buffer>,
 }
-
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ShaderUniforms {
+    pub comparison_enabled: u32,
+    pub comparison_position: f32,
+    pub _pad: [u32; 2], // For alignment
+}
 #[bon]
 impl ShaderEffect {
     #[builder]
@@ -48,6 +54,17 @@ impl ShaderEffect {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // Split screen uniforms
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
                     count: None,
                 },
             ],

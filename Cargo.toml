@@ -27,7 +27,7 @@ iced = {version="0.13.1", features = ["advanced"]}
 iced_wgpu = "0.13.5"
 wgpu = "23.0"
 winit = "0.29"
-bytemuck = { version = "1.14", features = ["derive"] }
+bytemuck = { version = "1.21", features = ["derive"] }
 pollster = "0.4"
 ffmpeg-next = { version = "7.1" }
 tracing = "0.1"

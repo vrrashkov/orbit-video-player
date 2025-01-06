@@ -2321,6 +2321,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bon",
+ "bytemuck",
  "ffmpeg-next",
  "iced",
  "iced_wgpu",

@@ -12,5 +12,6 @@ winit.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
 bon.workspace = true
+bytemuck.workspace = true
 # Local
 nebula-common.workspace = true
