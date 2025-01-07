@@ -23,6 +23,14 @@ pub struct Uniforms {
     pub matrix: [[f32; 3]; 3], // Color conversion matrix
     pub _pad: [u8; 188],       // Adjusted padding to maintain size
 }
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct LineUniforms {
+    position: f32,
+    bounds: [f32; 4], // x, y, width, height
+    line_width: f32,
+    _pad: [f32; 9], // Pad to make total size 64 bytes: (1 + 4 + 1 + 10) * 4 = 64
+}
 
 pub struct VideoEntry {
     pub texture_y: wgpu::Texture,
@@ -47,6 +55,9 @@ pub struct VideoPipeline {
     comparison_enabled: bool,
     comparison_position: f32, // 0.0 to 1.0
     line_pipeline: Option<wgpu::RenderPipeline>,
+    line_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    line_uniform_buffer: Option<wgpu::Buffer>,
+    line_bind_group: Option<wgpu::BindGroup>,
 }
 
 impl VideoPipeline {
@@ -171,9 +182,32 @@ impl VideoPipeline {
             comparison_enabled: false,
             comparison_position: 0.5,
             line_pipeline: None,
+            line_bind_group_layout: None,
+            line_uniform_buffer: None,
+            line_bind_group: None,
         };
+        let (line_pipeline, line_bind_group_layout) = video_pipeline.create_line_pipeline(device);
+        // Create uniform buffer for line
+        let line_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("line_uniform_buffer"),
+            size: 64, // Set explicit size to 64 bytes
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
-        video_pipeline.line_pipeline = Some(video_pipeline.create_line_pipeline(device));
+        // Create bind group for line
+        let line_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("line_bind_group"),
+            layout: &line_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: line_uniform_buffer.as_entire_binding(),
+            }],
+        });
+        video_pipeline.line_pipeline = Some(line_pipeline);
+        video_pipeline.line_bind_group_layout = Some(line_bind_group_layout);
+        video_pipeline.line_uniform_buffer = Some(line_uniform_buffer);
+        video_pipeline.line_bind_group = Some(line_bind_group);
 
         video_pipeline
     }
@@ -201,7 +235,10 @@ impl VideoPipeline {
         self.comparison_position = position.clamp(0.0, 1.0);
     }
     // Add this new method to create a line shader pipeline
-    fn create_line_pipeline(&self, device: &wgpu::Device) -> wgpu::RenderPipeline {
+    fn create_line_pipeline(
+        &self,
+        device: &wgpu::Device,
+    ) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout) {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("line_shader"),
             source: wgpu::ShaderSource::Wgsl(
@@ -209,7 +246,7 @@ impl VideoPipeline {
             ),
         });
 
-        // Create uniform buffer layout for line position
+        // Create bind group layout for line uniforms
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("line_bind_group_layout"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -224,15 +261,15 @@ impl VideoPipeline {
             }],
         });
 
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("line_pipeline_layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("line_pipeline"),
-            layout: Some(&layout),
+            layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
@@ -243,7 +280,18 @@ impl VideoPipeline {
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: self.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::SrcAlpha,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                    }),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
@@ -259,7 +307,9 @@ impl VideoPipeline {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
-        })
+        });
+
+        (pipeline, bind_group_layout)
     }
 
     fn draw_comparison_line(
@@ -269,7 +319,9 @@ impl VideoPipeline {
         x: f32,
         clip: &iced::Rectangle<u32>,
     ) {
-        if let Some(line_pipeline) = &self.line_pipeline {
+        if let (Some(line_pipeline), Some(line_bind_group)) =
+            (&self.line_pipeline, &self.line_bind_group)
+        {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("comparison_line"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -285,7 +337,19 @@ impl VideoPipeline {
                 occlusion_query_set: None,
             });
 
+            // Set viewport to match clip bounds
+            pass.set_viewport(
+                clip.x as f32,
+                clip.y as f32,
+                clip.width as f32,
+                clip.height as f32,
+                0.0,
+                1.0,
+            );
+
+            pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
             pass.set_pipeline(line_pipeline);
+            pass.set_bind_group(0, line_bind_group, &[]);
             pass.draw(0..6, 0..1);
         }
     }
@@ -633,6 +697,16 @@ impl VideoPipeline {
                 }
             }
         }
+
+        if let Some(line_uniform_buffer) = &self.line_uniform_buffer {
+            let uniforms = LineUniforms {
+                position: self.comparison_position * 2.0 - 1.0,
+                bounds: [bounds.x, bounds.y, bounds.width, bounds.height],
+                line_width: 2.0,
+                _pad: [0.0; 9],
+            };
+            queue.write_buffer(line_uniform_buffer, 0, bytemuck::cast_slice(&[uniforms]));
+        }
         if !self.effects.is_empty() && self.texture_manager.len() > 0 {
             for i in 0..self.effects.len() {
                 let input = if i == 0 {
@@ -739,6 +813,11 @@ impl VideoPipeline {
                 .zip(self.effects.bind_groups.last())
             {
                 self.apply_effect(encoder, last_effect, last_bind_group, target, clip, false);
+            }
+
+            if self.comparison_enabled {
+                let x = clip.x as f32 + (clip.width as f32 * self.comparison_position);
+                self.draw_comparison_line(encoder, target, x, clip);
             }
         }
     }
