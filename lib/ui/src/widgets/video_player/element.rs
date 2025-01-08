@@ -1,6 +1,12 @@
+use iced::widget::{
+    button, center, checkbox, column, container, horizontal_rule, horizontal_space, pick_list, row,
+    scrollable, stack, text, vertical_rule,
+};
 use iced::{
     advanced::{self, graphics::core::event::Status, layout, widget, Widget},
-    Element,
+    widget::{slider::Style, Space, Stack},
+    Alignment::Center,
+    Element, Length,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use nebula_core::video::{primitive::VideoPrimitive, stream::VideoStream};
@@ -11,7 +17,7 @@ use std::{
 
 use iced::widget::{Button, Column, Container, Row, Slider, Text};
 
-use super::Video;
+use super::{compariosn_slider::comparison_slider_style, Video};
 
 pub struct Player {
     stream: RefCell<VideoStream>,
@@ -113,9 +119,25 @@ impl Player {
         let is_looping = self.stream.borrow().looping();
         let current = self.stream.borrow().current_time();
         let total = self.stream.borrow().total_time().unwrap();
+        // let video_row = {
+        //     let mut row = Stack::new().push(
+        //         Container::new("Test22222")
+        //             .width(iced::Length::Fill)
+        //             .height(iced::Length::Fill),
+        //     );
 
-        Column::new()
-            .push(
+        //     if self.comparison_enabled {
+        //         row = row.push(
+        //             Container::new("Test On Top")
+        //                 .width(iced::Length::Fixed(40.0))
+        //                 .height(iced::Length::Fill),
+        //         );
+        //     }
+
+        //     row
+        // };
+        let video_row = {
+            let mut row = Stack::new().push(
                 Container::new(
                     Video::new(&self.stream)
                         .width(iced::Length::Fill)
@@ -131,8 +153,35 @@ impl Player {
                         .on_end_of_stream(Event::EndOfStream)
                         .on_new_frame(Event::NewFrame),
                 )
-                .align_x(iced::Alignment::Center)
-                .align_y(iced::Alignment::Center)
+                .width(iced::Length::Fill)
+                .height(iced::Length::Fill),
+            );
+
+            if self.comparison_enabled {
+                row = row.push(
+                    Container::new(
+                        Slider::new(0.0..=1.0, self.comparison_position, |pos| {
+                            Event::UpdateComparisonPosition(pos)
+                        })
+                        .style(comparison_slider_style)
+                        .step(0.001),
+                    )
+                    .width(iced::Length::Fixed(40.0))
+                    .height(iced::Length::Fill)
+                    .align_y(Center)
+                    .align_x(Center),
+                );
+            }
+
+            row
+        };
+        Column::new()
+            .push(
+                Container::new(column![
+                    "The pin widget can be used to position a widget \
+        at some fixed coordinates inside some other widget.",
+                    video_row
+                ])
                 .width(iced::Length::Fill)
                 .height(iced::Length::Fill),
             )

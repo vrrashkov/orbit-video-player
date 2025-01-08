@@ -2,7 +2,7 @@ use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use nebula_core::video::stream::VideoStream;
 use std::{cell::RefCell, marker::PhantomData};
 
-// pub mod comparison_line;
+pub mod compariosn_slider;
 pub mod element;
 pub struct Video<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
