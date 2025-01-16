@@ -68,10 +68,16 @@ impl Primitive for VideoPrimitive {
             let mut video_pipeline = VideoPipeline::new(device, format);
 
             // Add effects
+            // video_pipeline.add_effect(
+            //     device,
+            //     queue,
+            //     include_str!("../../../../assets/shaders/grayscale.wgsl").into(),
+            //     // None,
+            // );
             video_pipeline.add_effect(
                 device,
                 queue,
-                include_str!("../../../../assets/shaders/grayscale.wgsl").into(),
+                include_str!("../../../../assets/shaders/upscale_v1.wgsl").into(),
                 // None,
             );
             storage.store(video_pipeline);

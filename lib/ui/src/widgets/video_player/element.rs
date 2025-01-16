@@ -166,7 +166,7 @@ impl Player {
                         .style(comparison_slider_style)
                         .step(0.001),
                     )
-                    .width(iced::Length::Fixed(40.0))
+                    .width(iced::Length::Fill)
                     .height(iced::Length::Fill)
                     .align_y(Center)
                     .align_x(Center),
@@ -177,13 +177,9 @@ impl Player {
         };
         Column::new()
             .push(
-                Container::new(column![
-                    "The pin widget can be used to position a widget \
-        at some fixed coordinates inside some other widget.",
-                    video_row
-                ])
-                .width(iced::Length::Fill)
-                .height(iced::Length::Fill),
+                Container::new(column![video_row])
+                    .width(iced::Length::Fill)
+                    .height(iced::Length::Fill),
             )
             .push(
                 Container::new(
