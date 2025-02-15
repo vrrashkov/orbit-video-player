@@ -8,25 +8,23 @@ use iced::{
 
 pub fn comparison_slider_style(theme: &Theme, status: Status) -> Style {
     let palette = theme.extended_palette();
-    let style = Style {
+
+    Style {
         rail: Rail {
             backgrounds: (
-                iced::Background::Color(palette.primary.base.color),
-                iced::Background::Color(palette.background.weak.color),
+                // Thin vertical line with primary color
+                iced::Background::Color(palette.primary.base.color.scale_alpha(0.0)),
+                iced::Background::Color(palette.primary.base.color.scale_alpha(0.0)),
             ),
-            width: 20.0,
+            width: 2.0, // Very thin line
             border: Default::default(),
         },
         handle: Handle {
-            shape: HandleShape::Circle { radius: 8.0 },
+            // Custom SVG-like handle design
+            shape: HandleShape::Circle { radius: 10.0 },
             border_width: 2.0,
-            border_color: palette.primary.base.text,
-            background: iced::Background::Color(palette.primary.base.text),
+            border_color: palette.primary.base.color,
+            background: iced::Background::Color(palette.background.base.color),
         },
-    };
-    match status {
-        Status::Active => style,
-        Status::Hovered => style,
-        Status::Dragged => style,
     }
 }

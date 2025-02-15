@@ -7,7 +7,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use crate::video::shader_effect::ShaderUniforms;
+use crate::video::shader::{ShaderEffectBuilder, ShaderUniforms, UniformValue};
 
 use super::{
     color_space::BT709_CONFIG, effect_chain::EffectChain, render_passes::RenderPasses,
@@ -54,6 +54,8 @@ pub struct VideoPipeline {
     format: wgpu::TextureFormat,
     comparison_enabled: bool,
     comparison_position: f32, // 0.0 to 1.0
+    color_threshold: f32,
+    color_blend_mode: f32,
     line_pipeline: Option<wgpu::RenderPipeline>,
     line_bind_group_layout: Option<wgpu::BindGroupLayout>,
     line_uniform_buffer: Option<wgpu::Buffer>,
@@ -185,6 +187,8 @@ impl VideoPipeline {
             line_bind_group_layout: None,
             line_uniform_buffer: None,
             line_bind_group: None,
+            color_threshold: 0.05,
+            color_blend_mode: 2.,
         };
         let (line_pipeline, line_bind_group_layout) = video_pipeline.create_line_pipeline(device);
         // Create uniform buffer for line
@@ -353,40 +357,31 @@ impl VideoPipeline {
             pass.draw(0..6, 0..1);
         }
     }
-    pub fn add_effect(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        shader_source: &str,
-        // uniforms: Option<&[u8]>,
-    ) {
-        // let uniform_buffer = uniforms.map(|data| {
-        //     device.create_buffer(&wgpu::BufferDescriptor {
-        //         label: Some("effect_uniforms"),
-        //         size: data.len() as u64,
-        //         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        //         mapped_at_creation: false,
-        //     })
-        // });
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("shader_effect_uniforms"),
-            size: std::mem::size_of::<ShaderUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let shader_uniforms = ShaderUniforms {
-            comparison_enabled: 0,
-            comparison_position: 0.5,
-            _pad: [0; 2],
-        };
-        queue.write_buffer(&uniform_buffer, 0, bytemuck::cast_slice(&[shader_uniforms]));
+    pub fn add_effect(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, shader_source: &str) {
+        // Create uniform buffer with initial values
+        let mut shader_uniforms = ShaderUniforms::new(device, 2);
 
-        let effect_builder = ShaderEffect::builder()
-            .device(device)
-            .shader_source(shader_source)
-            .format(self.format)
-            .maybe_uniforms(Some(uniform_buffer))
-            .build();
+        // Add all the uniforms we currently use
+        shader_uniforms.set_uniform(
+            "comparison_enabled",
+            UniformValue::Uint(self.comparison_enabled as u32),
+        );
+        shader_uniforms.set_uniform(
+            "comparison_position",
+            UniformValue::Float(self.comparison_position),
+        );
+        shader_uniforms.set_uniform("color_threshold", UniformValue::Float(self.color_threshold));
+        shader_uniforms.set_uniform(
+            "color_blend_mode",
+            UniformValue::Float(self.color_blend_mode),
+        );
+
+        // Update the buffer with initial values
+        shader_uniforms.update_buffer(queue);
+
+        let effect_builder = ShaderEffectBuilder::new("effect")
+            .with_shader_source(shader_source)
+            .build(device, queue, self.format);
 
         let texture_size = if let Some(video) = self.videos.values().next() {
             let extent = video.texture_y.size();
@@ -407,30 +402,14 @@ impl VideoPipeline {
         println!("Before resize - Effects len: {}", self.effects.len());
         println!("Texture size: {:?}", texture_size);
 
-        // Add 1 to ensure enough intermediate textures for each effect + final render
         self.texture_manager.resize_intermediate_textures(
             device,
             texture_size,
-            self.effects.len() + 1, // Ensure this creates enough textures
-        );
-
-        // Debug print after resize
-        println!(
-            "After resize - Intermediate textures: {}",
-            self.texture_manager.intermediate_textures.len()
+            self.effects.len() + 1,
         );
 
         self.effects.add_effect(effect_builder);
-
-        // Force bind group recreation in prepare method
         self.effects.clear_bind_groups();
-
-        // Debug print final state
-        println!("Final - Effects len: {}", self.effects.len());
-        println!(
-            "Final - Intermediate textures: {}",
-            self.texture_manager.intermediate_textures.len()
-        );
     }
 
     pub fn upload(
@@ -681,23 +660,34 @@ impl VideoPipeline {
         self.effects.clear_bind_groups();
 
         if !self.effects.is_empty() {
-            for effect in self.effects.effects() {
-                if let Some(uniforms_buffer) = &effect.uniforms {
-                    let shader_uniforms = ShaderUniforms {
-                        comparison_enabled: self.comparison_enabled as u32,
-                        comparison_position: self.comparison_position,
-                        _pad: [0; 2],
-                    };
-
-                    queue.write_buffer(
-                        uniforms_buffer,
-                        0,
-                        bytemuck::cast_slice(&[shader_uniforms]),
+            for effect in self.effects.effects_mut() {
+                // Note: Order is important should be same as shader
+                if let Some(uniforms) = &mut effect.uniforms {
+                    uniforms.set_uniform(
+                        "comparison_enabled",
+                        UniformValue::Uint(self.comparison_enabled as u32),
                     );
+                    uniforms.set_uniform(
+                        "comparison_position",
+                        UniformValue::Float(self.comparison_position),
+                    );
+                    uniforms
+                        .set_uniform("color_threshold", UniformValue::Float(self.color_threshold));
+                    uniforms.set_uniform(
+                        "color_blend_mode",
+                        UniformValue::Uint(self.color_blend_mode as u32),
+                    );
+
+                    uniforms.validate_layout();
+                    uniforms.update_buffer(queue);
                 }
             }
         }
-
+        println!("Setting uniforms:");
+        println!("  comparison_enabled: {}", self.comparison_enabled);
+        println!("  comparison_position: {}", self.comparison_position);
+        println!("  color_threshold: {}", self.color_threshold);
+        println!("  color_blend_mode: {}", self.color_blend_mode);
         if let Some(line_uniform_buffer) = &self.line_uniform_buffer {
             let uniforms = LineUniforms {
                 position: self.comparison_position * 2.0 - 1.0,
@@ -724,7 +714,7 @@ impl VideoPipeline {
                 let effect = &self.effects.effects()[i];
                 let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("effect_bind_group"),
-                    layout: &self.effects.effects()[i].bind_group_layout,
+                    layout: &effect.bind_group_layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -737,12 +727,9 @@ impl VideoPipeline {
                         wgpu::BindGroupEntry {
                             binding: 2,
                             resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                                buffer: effect.uniforms.as_ref().unwrap(),
+                                buffer: effect.uniforms.as_ref().unwrap().buffer(),
                                 offset: 0,
-                                size: Some(
-                                    NonZero::new(std::mem::size_of::<ShaderUniforms>() as _)
-                                        .unwrap(),
-                                ),
+                                size: NonZero::new(256), // Match buffer size
                             }),
                         },
                     ],
@@ -768,7 +755,10 @@ impl VideoPipeline {
                 self.texture_manager.intermediate_textures.len()
             );
             println!("Bind Groups: {}", self.effects.bind_groups.len());
-
+            println!("Draw state:");
+            println!("  Comparison enabled: {}", self.comparison_enabled);
+            println!("  Comparison position: {}", self.comparison_position);
+            println!("  Current tex coords bound: {:?}", clip);
             // Single video rendering logic
             if self.effects.is_empty() {
                 self.draw_video_pass(target, encoder, clip, &video);
@@ -884,6 +874,10 @@ impl VideoPipeline {
         clip: &iced::Rectangle<u32>,
         clear: bool,
     ) {
+        if let Some(uniforms) = &effect.uniforms {
+            println!("Debug before applying effect:");
+            uniforms.debug_print_values();
+        }
         RenderPasses::apply_effect(effect, encoder, bind_group, output, clip, clear);
     }
 }

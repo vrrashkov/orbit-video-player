@@ -48,4 +48,7 @@ impl EffectChain {
     pub fn len(&self) -> usize {
         self.effects.len()
     }
+    pub fn effects_mut(&mut self) -> &mut [ShaderEffect] {
+        &mut self.effects
+    }
 }

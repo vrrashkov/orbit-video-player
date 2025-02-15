@@ -13,5 +13,6 @@ tracing.workspace = true
 anyhow.workspace = true
 bon.workspace = true
 bytemuck.workspace = true
+indexmap.workspace = true
 # Local
 nebula-common.workspace = true

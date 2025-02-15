@@ -15,6 +15,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 env_logger.workspace = true 
+indexmap.workspace = true
 # LOCAL
 nebula-common.workspace = true
 nebula-ui.workspace = true
@@ -39,3 +40,4 @@ bon = "3.3.2"
 nebula-common = { path = "lib/common" }
 nebula-core = { path = "lib/core" }
 nebula-ui = { path = "lib/ui" }
+indexmap = "2.0"
