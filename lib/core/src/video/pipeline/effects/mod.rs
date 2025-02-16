@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+
+use crate::video::{shader::ShaderUniforms, ShaderEffect};
+
 use iced_wgpu::primitive::Primitive;
 use iced_wgpu::wgpu;
 use std::{
@@ -6,14 +10,23 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use super::ShaderEffect;
+use super::manager::VideoPipelineManager;
 
-pub struct EffectChain {
-    pub effects: Vec<ShaderEffect>,
+pub mod upscale;
+
+pub trait Effect: Send + Sync {
+    fn add(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> ShaderEffect;
+    fn prepare(&mut self, effect: &mut ShaderEffect, queue: &wgpu::Queue);
+    fn update_comparison(&mut self, comparison_enabled: bool, comparison_position: f32);
+    fn clone_box(&self) -> Box<dyn Effect>;
+}
+
+pub struct EffectManager {
+    pub effects: Vec<(ShaderEffect, Box<dyn Effect>)>,
     pub bind_groups: Vec<wgpu::BindGroup>,
 }
 
-impl EffectChain {
+impl EffectManager {
     pub fn new() -> Self {
         Self {
             effects: Vec::new(),
@@ -21,16 +34,12 @@ impl EffectChain {
         }
     }
 
-    pub fn add_effect(&mut self, effect: ShaderEffect) {
-        self.effects.push(effect);
+    pub fn add_effect(&mut self, effect: ShaderEffect, state: Box<dyn Effect>) {
+        self.effects.push((effect, state));
     }
 
     pub fn add_bind_group(&mut self, bind_group: wgpu::BindGroup) {
         self.bind_groups.push(bind_group);
-    }
-
-    pub fn effects(&self) -> &[ShaderEffect] {
-        &self.effects
     }
 
     pub fn bind_groups(&self) -> &[wgpu::BindGroup] {
@@ -48,7 +57,7 @@ impl EffectChain {
     pub fn len(&self) -> usize {
         self.effects.len()
     }
-    pub fn effects_mut(&mut self) -> &mut [ShaderEffect] {
-        &mut self.effects
+    pub fn clear(&mut self) {
+        self.effects.clear();
     }
 }

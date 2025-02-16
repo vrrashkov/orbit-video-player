@@ -43,7 +43,32 @@ pub struct VideoEntry {
     pub render_index: AtomicUsize,
     pub aligned_uniform_size: usize, // Add this field
 }
+pub struct PipelineConfig {
+    pub format: wgpu::TextureFormat,
+    pub sample_count: u32,
+    pub blend_state: Option<wgpu::BlendState>,
+    pub primitive_state: wgpu::PrimitiveState,
+}
 
+impl Default for PipelineConfig {
+    fn default() -> Self {
+        Self {
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            sample_count: 1,
+            blend_state: None,
+            primitive_state: wgpu::PrimitiveState::default(),
+        }
+    }
+}
+pub trait PipelineBuilder {
+    fn build_pipeline(
+        device: &wgpu::Device,
+        config: &PipelineConfig,
+        bind_group_layouts: &[&wgpu::BindGroupLayout],
+    ) -> wgpu::RenderPipeline;
+
+    fn create_bind_group_layouts(device: &wgpu::Device) -> Vec<wgpu::BindGroupLayout>;
+}
 pub struct VideoPipeline {
     pipeline: wgpu::RenderPipeline,
     bg0_layout: wgpu::BindGroupLayout,
@@ -65,14 +90,14 @@ pub struct VideoPipeline {
 impl VideoPipeline {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("iced_video_player shader"),
+            label: Some("nebula_player shader"),
             source: wgpu::ShaderSource::Wgsl(
                 include_str!("../../../../assets/shaders/video.wgsl").into(),
             ),
         });
 
         let bg0_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("iced_video_player bind group 0 layout"),
+            label: Some("nebula_player bind group 0 layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -114,13 +139,13 @@ impl VideoPipeline {
         });
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("iced_video_player pipeline layout"),
+            label: Some("nebula_player pipeline layout"),
             bind_group_layouts: &[&bg0_layout],
             push_constant_ranges: &[],
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("iced_video_player pipeline"),
+            label: Some("nebula_player pipeline"),
             layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -238,7 +263,6 @@ impl VideoPipeline {
     pub fn set_comparison_position(&mut self, position: f32) {
         self.comparison_position = position.clamp(0.0, 1.0);
     }
-    // Add this new method to create a line shader pipeline
     fn create_line_pipeline(
         &self,
         device: &wgpu::Device,

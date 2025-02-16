@@ -18,10 +18,23 @@ pub enum UniformValue {
 #[derive(Debug)]
 pub struct ShaderUniforms {
     buffer: wgpu::Buffer,
-    values: IndexMap<String, UniformValue>,
+    pub values: IndexMap<String, UniformValue>,
     layout_entry: wgpu::BindGroupLayoutEntry,
 }
 impl ShaderUniforms {
+    pub fn get_float(&self, name: &str) -> Option<f32> {
+        self.values.get(name).and_then(|value| match value {
+            UniformValue::Float(v) => Some(*v),
+            _ => None,
+        })
+    }
+
+    pub fn get_uint(&self, name: &str) -> Option<u32> {
+        self.values.get(name).and_then(|value| match value {
+            UniformValue::Uint(v) => Some(*v),
+            _ => None,
+        })
+    }
     pub fn debug_print_values(&self) {
         println!("Current uniform values:");
         let mut sorted_values: Vec<_> = self.values.iter().collect();
@@ -33,8 +46,8 @@ impl ShaderUniforms {
     }
     pub fn validate_layout(&self) {
         let mut offset = 0;
-        let mut sorted_values: Vec<_> = self.values.iter().collect();
-        sorted_values.sort_by_key(|(name, _)| *name);
+        let sorted_values: Vec<_> = self.values.iter().collect();
+        // sorted_values.sort_by_key(|(name, _)| *name);
 
         println!("\nUniform layout validation:");
         for (name, value) in &sorted_values {
@@ -140,7 +153,6 @@ impl ShaderUniforms {
     }
 }
 
-// Enhanced shader effect builder
 pub struct ShaderEffectBuilder {
     name: String,
     shader_source: String,
@@ -166,7 +178,6 @@ impl ShaderEffectBuilder {
         self.shader_source = source.to_string();
         self
     }
-
     pub fn with_uniform(mut self, name: &str, value: UniformValue) -> Self {
         self.pending_uniforms.insert(name.to_string(), value);
         self

@@ -7,8 +7,12 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use super::{color_space::BT709_CONFIG, pipeline::VideoPipeline};
+use crate::video::pipeline::effects::{
+    upscale::{UpscaleEffect, UpscaleEffectState},
+    Effect,
+};
 
+use super::pipeline::manager::VideoPipelineManager;
 #[derive(Debug, Clone)]
 pub struct VideoPrimitive {
     video_id: u64,
@@ -17,7 +21,6 @@ pub struct VideoPrimitive {
     size: (u32, u32),
     upload_frame: bool,
     color_space: Space,
-    // Add new fields
     comparison_enabled: bool,
     comparison_position: f32,
 }
@@ -42,7 +45,7 @@ impl VideoPrimitive {
             comparison_position: 0.5,
         }
     }
-    // Add methods to control comparison
+
     pub fn with_comparison(mut self, enabled: bool) -> Self {
         self.comparison_enabled = enabled;
         self
@@ -53,7 +56,6 @@ impl VideoPrimitive {
         self
     }
 }
-
 impl Primitive for VideoPrimitive {
     fn prepare(
         &self,
@@ -64,41 +66,52 @@ impl Primitive for VideoPrimitive {
         bounds: &iced::Rectangle,
         viewport: &iced_wgpu::graphics::Viewport,
     ) {
-        if !storage.has::<VideoPipeline>() {
-            let mut video_pipeline = VideoPipeline::new(device, format);
+        dbg!("testttttt 1111");
+        let has_manager = storage.has::<VideoPipelineManager>();
+        dbg!("Has VideoPipelineManager:", has_manager);
+        if !has_manager {
+            dbg!("testttttt 2222");
+            let mut pipeline_manager = VideoPipelineManager::new(device, format);
 
-            // Add effects
-            // video_pipeline.add_effect(
-            //     device,
-            //     queue,
-            //     include_str!("../../../../assets/shaders/grayscale.wgsl").into(),
-            //     // None,
-            // );
-            video_pipeline.add_effect(
+            // UPSCALE SHADER EFFECT
+            let mut upscale_effect = UpscaleEffect {
+                state: UpscaleEffectState {
+                    comparison_enabled: self.comparison_enabled,
+                    comparison_position: self.comparison_position,
+                    color_threshold: 1.,
+                    color_blend_mode: 0.5,
+                },
+                format,
+            };
+
+            dbg!("upscale_effect", &upscale_effect);
+            let upscale_shader_effect = upscale_effect.add(device, queue);
+            pipeline_manager.add_effect(
                 device,
                 queue,
-                include_str!("../../../../assets/shaders/upscale_v1.wgsl").into(),
-                // None,
+                upscale_shader_effect,
+                Box::new(upscale_effect),
             );
-            storage.store(video_pipeline);
+            //
+            storage.store(pipeline_manager);
         }
 
-        let pipeline = storage.get_mut::<VideoPipeline>().unwrap();
+        let pipeline_manager = storage.get_mut::<VideoPipelineManager>().unwrap();
 
         if self.upload_frame {
-            pipeline.upload(
+            pipeline_manager.upload_frame(
                 device,
                 queue,
                 self.video_id,
-                self.alive,
-                self.size,
+                self.size.0,
+                self.size.1,
                 self.frame.as_slice(),
+                self.alive,
             );
         }
-        pipeline.set_comparison_enabled(self.comparison_enabled);
-        pipeline.set_comparison_position(self.comparison_position);
 
-        pipeline.prepare(
+        // Prepare for rendering
+        pipeline_manager.prepare(
             device,
             queue,
             self.video_id,
@@ -109,6 +122,20 @@ impl Primitive for VideoPrimitive {
                 )),
             self.color_space,
         );
+        for effect in &mut pipeline_manager.effect_manager.effects {
+            effect
+                .1
+                .as_mut()
+                .update_comparison(self.comparison_enabled, self.comparison_position);
+            effect.1.as_mut().prepare(&mut effect.0, queue);
+        }
+        // Debug prints
+        println!("Effects count: {}", pipeline_manager.has_effects());
+        println!(
+            "Texture manager size: {}",
+            pipeline_manager.texture_manager.len()
+        );
+        println!("Comparison enabled: {}", self.comparison_enabled);
     }
 
     fn render(
@@ -118,7 +145,7 @@ impl Primitive for VideoPrimitive {
         target: &wgpu::TextureView,
         clip_bounds: &iced::Rectangle<u32>,
     ) {
-        let pipeline = storage.get::<VideoPipeline>().unwrap();
-        pipeline.draw(target, encoder, clip_bounds, self.video_id);
+        let pipeline_manager = storage.get::<VideoPipelineManager>().unwrap();
+        pipeline_manager.draw(target, encoder, clip_bounds, self.video_id);
     }
 }

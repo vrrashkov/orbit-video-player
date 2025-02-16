@@ -12,9 +12,7 @@ use wgpu::{
     TextureView,
 };
 
-use super::{color_space::BT709_CONFIG, pipeline::Uniforms, ShaderEffect};
-
-use super::pipeline::VideoEntry;
+use super::{color_space::BT709_CONFIG, pipeline::manager::VideoEntry, ShaderEffect};
 
 pub(crate) struct RenderPasses;
 
