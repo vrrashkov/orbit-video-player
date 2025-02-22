@@ -215,6 +215,16 @@ impl ShaderEffectBuilder {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) -> ShaderEffect {
+        let bind_layout_group = self
+            .bind_group_layout
+            .expect("Bind group layout must be provided");
+
+        let original_layout_id = bind_layout_group.global_id();
+        println!(
+            "ShaderEffectBuilder starting with layout ID: {:?}",
+            original_layout_id
+        );
+
         // Create sampler first
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some(&format!("{}_sampler", self.name)),
@@ -236,38 +246,10 @@ impl ShaderEffectBuilder {
             .uniforms
             .or_else(|| Some(ShaderUniforms::new(device, 2)));
 
-        // Create bind group layout
-        // let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        //     label: Some(&format!("{}_bind_group_layout", self.name)),
-        //     entries: &[
-        //         wgpu::BindGroupLayoutEntry {
-        //             binding: 0,
-        //             visibility: wgpu::ShaderStages::FRAGMENT,
-        //             ty: wgpu::BindingType::Texture {
-        //                 sample_type: wgpu::TextureSampleType::Float { filterable: true },
-        //                 view_dimension: wgpu::TextureViewDimension::D2,
-        //                 multisampled: false,
-        //             },
-        //             count: None,
-        //         },
-        //         wgpu::BindGroupLayoutEntry {
-        //             binding: 1,
-        //             visibility: wgpu::ShaderStages::FRAGMENT,
-        //             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-        //             count: None,
-        //         },
-        //         wgpu::BindGroupLayoutEntry {
-        //             binding: 2,
-        //             visibility: wgpu::ShaderStages::FRAGMENT,
-        //             ty: wgpu::BindingType::Buffer {
-        //                 ty: wgpu::BufferBindingType::Uniform,
-        //                 has_dynamic_offset: false,
-        //                 min_binding_size: Some(NonZero::new(16).unwrap()),
-        //             },
-        //             count: None,
-        //         },
-        //     ],
-        // });
+        println!(
+            "ShaderEffectBuilder starting with layout ID: {:?}",
+            original_layout_id
+        );
 
         println!("Created bind group layout");
 
@@ -276,7 +258,6 @@ impl ShaderEffectBuilder {
             source: wgpu::ShaderSource::Wgsl(self.shader_source.into()),
         });
 
-        let bind_layout_group = self.bind_group_layout.unwrap();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("{}_pipeline_layout", self.name)),
             bind_group_layouts: &[&bind_layout_group],
@@ -305,15 +286,32 @@ impl ShaderEffectBuilder {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
+        println!(
+            "Created pipeline with layout. Original layout ID: {:?}",
+            original_layout_id
+        );
+        println!("Current layout ID: {:?}", bind_layout_group.global_id());
 
-        ShaderEffect {
+        let effect = ShaderEffect {
             name: self.name,
             pipeline,
             bind_group_layout: bind_layout_group,
             format,
             uniforms,
             sampler,
-        }
+        };
+
+        println!(
+            "Final ShaderEffect layout ID: {:?}",
+            effect.bind_group_layout.global_id()
+        );
+        assert_eq!(
+            original_layout_id,
+            effect.bind_group_layout.global_id(),
+            "Layout ID changed during ShaderEffect creation"
+        );
+
+        effect
     }
 }
 
@@ -348,5 +346,12 @@ impl ShaderEffect {
             uniforms.set_uniform(name, value);
             uniforms.update_buffer(queue);
         }
+    }
+    pub fn debug_layout(&self) {
+        println!(
+            "ShaderEffect '{}' layout ID: {:?}",
+            self.name,
+            self.bind_group_layout.global_id()
+        );
     }
 }

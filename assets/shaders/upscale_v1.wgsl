@@ -135,52 +135,18 @@ fn get_luma(color: vec4<f32>) -> f32 {
 }
 @fragment
 fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
-    // Texture size and dimension checks
     let tex_size = textureDimensions(input_texture);
-    
-    // Extensive diagnostic logging
-    if (tex_size.x == 0u || tex_size.y == 0u) {
-        return vec4<f32>(1.0, 0.0, 0.0, 1.0); // Red for invalid texture size
-    }
-
-    // Safe UV clamping
     let safe_uv = clamp(tex_coords, vec2<f32>(0.0), vec2<f32>(1.0));
+    let color = safe_texture_sample(input_texture, s_sampler, safe_uv);
     
-    // Sample the texture
-    let color = textureSample(input_texture, s_sampler, safe_uv);
-    
-    // Detailed color diagnostics
-    let r = color.r;
-    let g = color.g;
-    let b = color.b;
-    let color_intensity = length(color.rgb);
-
-    // Diagnostic for zero values
-    if (r == 0.0 && g == 0.0 && b == 0.0) {
-        // More informative diagnostic for zero values
-        return vec4<f32>(
-            0.5,  // Mid-tone red
-            0.0,  // No green
-            0.5,  // Mid-tone blue
-            1.0
-        );
+    // Debug color values
+    if (color.r == 0.0 && color.g == 0.0 && color.b == 0.0) {
+        return vec4<f32>(1.0, 0.0, 1.0, 1.0);  // Bright purple for zero values
+    } else if (color.r < 0.01 && color.g < 0.01 && color.b < 0.01) {
+        return vec4<f32>(0.5, 0.0, 0.0, 1.0);  // Dark red for near-zero values
     }
-
-    // Intensity check with more nuanced output
-    if (color_intensity < 0.001) {
-        // Showcase actual color values
-        return vec4<f32>(
-            abs(r) * 5.0,   // Amplified red
-            abs(g) * 5.0,   // Amplified green
-            abs(b) * 5.0,   // Amplified blue
-            1.0
-        );
-    }
-
-    // Normal processing
-    let processed_color = apply_upscale(color, safe_uv);
     
-    return processed_color;
+    return color;
 }
 
 fn apply_upscale(color: vec4<f32>, tex_coords: vec2<f32>) -> vec4<f32> {

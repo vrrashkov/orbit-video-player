@@ -1,7 +1,7 @@
 use iced_wgpu::primitive::Primitive;
 use iced_wgpu::wgpu;
 use std::{
-    collections::{btree_map::Entry, BTreeMap},
+    collections::{btree_map::Entry, BTreeMap, HashMap},
     num::NonZero,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -89,41 +89,27 @@ impl TextureManager {
         size: wgpu::Extent3d,
         num_effects: usize,
     ) {
+        // Skip if we already have enough textures of the right size
+        if self.intermediate_textures.len() > num_effects {
+            let existing_size = self.intermediate_textures[0].size();
+            if existing_size.width == size.width && existing_size.height == size.height {
+                return;
+            }
+        }
+
         println!("\nResizing intermediate textures:");
-        println!("  Requested size: {:?}", size);
+        println!("  Original requested size: {:?}", size);
         println!("  Number of effects: {}", num_effects);
         println!("  Format: {:?}", self.format);
 
-        // Validate input parameters
-        if size.width == 0 || size.height == 0 {
-            println!("WARNING: Invalid texture size requested");
-            return;
-        }
-
+        // Clear existing textures
         self.intermediate_textures.clear();
 
+        // Create new textures
         for i in 0..=num_effects {
             println!("\nCreating intermediate texture {}", i);
             let texture = self.create_intermediate_texture(device, size);
-
-            // Validate created texture
-            if texture.format() != self.format {
-                println!("WARNING: Format mismatch in created texture");
-                println!("  Expected: {:?}", self.format);
-                println!("  Got: {:?}", texture.format());
-            }
-
             self.intermediate_textures.push(texture);
-        }
-
-        println!(
-            "\nFinished creating {} intermediate textures",
-            self.intermediate_textures.len()
-        );
-
-        // Validate final state
-        if !self.validate_formats() {
-            println!("WARNING: Format validation failed after resize");
         }
     }
     pub fn validate_formats(&self) -> bool {

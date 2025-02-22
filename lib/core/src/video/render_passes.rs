@@ -72,7 +72,7 @@ impl RenderPasses {
         }
         pass.draw(0..6, 0..1);
 
-        video.prepare_index.store(0, Ordering::Relaxed);
+        // video.prepare_index.store(0, Ordering::Relaxed);
         video.render_index.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -83,6 +83,10 @@ impl RenderPasses {
         output: &wgpu::TextureView,
         clip: &iced::Rectangle<u32>,
         clear: bool,
+        render_target_width: f32,
+        render_target_height: f32,
+        texture_width: f32,
+        texture_height: f32,
     ) {
         println!("Apply effect debug:");
         println!("  Effect name: {}", effect.name);
@@ -114,9 +118,40 @@ impl RenderPasses {
             occlusion_query_set: None,
         });
 
-        // Set viewport and scissor
+        // Calculate aspect ratios
+        let target_aspect = render_target_width / render_target_height;
+        let texture_aspect = texture_width / texture_height;
 
-        pass.set_viewport(0.0, 0.0, clip.width as f32, clip.height as f32, 0.0, 1.0);
+        // Calculate scale factors
+        let (viewport_width, viewport_height) = if target_aspect > texture_aspect {
+            // Width constrained by height
+            let height = render_target_height;
+            let width = height * texture_aspect;
+            (width, height)
+        } else {
+            // Height constrained by width
+            let width = render_target_width;
+            let height = width / texture_aspect;
+            (width, height)
+        };
+
+        // Calculate viewport offset to center the content
+        let x_offset = (render_target_width - viewport_width) / 2.0;
+        let y_offset = (render_target_height - viewport_height) / 2.0;
+
+        // Ensure viewport dimensions don't exceed render target
+        let viewport_width = viewport_width.min(render_target_width);
+        let viewport_height = viewport_height.min(render_target_height);
+
+        // Set viewport with calculated dimensions
+        pass.set_viewport(
+            x_offset,
+            y_offset,
+            viewport_width,
+            viewport_height,
+            0.0,
+            1.0,
+        );
         pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
 
         println!("Setting pipeline");
@@ -143,10 +178,6 @@ impl RenderPasses {
         // Add viewport debug info
         println!("Effect viewport:");
         println!("  Clip: {:?}", clip);
-        println!(
-            "  Viewport: 0.0, 0.0, {}, {}, 0.0, 1.0",
-            clip.width, clip.height
-        );
 
         pass.draw(0..6, 0..1);
     }

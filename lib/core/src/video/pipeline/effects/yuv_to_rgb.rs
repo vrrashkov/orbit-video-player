@@ -12,7 +12,6 @@ pub struct YuvToRgbEffect {
     pub color_space: u32, // 0 for BT.709, 1 for BT.601
     pub format: wgpu::TextureFormat,
 }
-
 impl Effect for YuvToRgbEffect {
     fn add(
         &mut self,
@@ -20,7 +19,7 @@ impl Effect for YuvToRgbEffect {
         queue: &iced_wgpu::wgpu::Queue,
     ) -> ShaderEffect {
         // Create uniform buffer with color space
-        let mut shader_uniforms = ShaderUniforms::new(device, 1);
+        let mut shader_uniforms = ShaderUniforms::new(device, 3); // Changed binding to 3 to match layout
 
         // Set color space uniform
         shader_uniforms.set_uniform("color_space", UniformValue::Uint(self.color_space));
@@ -34,7 +33,8 @@ impl Effect for YuvToRgbEffect {
             shader_source.len() > 0
         );
 
-        // Create bind group layout for YUV to RGB conversion
+        // Create bind group layout with more detailed logging
+        println!("Creating YUV to RGB bind group layout");
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("yuv_to_rgb_bind_group_layout"),
             entries: &[
@@ -60,7 +60,7 @@ impl Effect for YuvToRgbEffect {
                     },
                     count: None,
                 },
-                // Sampler (changed to match shader)
+                // Sampler
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -81,20 +81,33 @@ impl Effect for YuvToRgbEffect {
             ],
         });
 
+        println!(
+            "Created YUV to RGB bind group layout with ID: {:?}",
+            bind_group_layout.global_id()
+        );
+
+        // Store the layout for later comparison
+        let layout_id = bind_group_layout.global_id();
+
         let shader_effect = ShaderEffectBuilder::new("yuv_to_rgb")
             .with_shader_source(shader_source.into())
             .with_bind_group_layout(bind_group_layout)
             .with_uniforms(shader_uniforms)
             .build(device, queue, self.format);
 
-        shader_effect
-    }
+        println!(
+            "Created shader effect with layout ID: {:?}",
+            shader_effect.bind_group_layout.global_id()
+        );
 
-    fn prepare(&mut self, effect: &mut ShaderEffect, queue: &iced_wgpu::wgpu::Queue) {
-        if let Some(uniforms) = &mut effect.uniforms {
-            uniforms.set_uniform("color_space", UniformValue::Uint(self.color_space));
-            uniforms.update_buffer(queue);
-        }
+        // Verify layout preservation
+        assert_eq!(
+            layout_id,
+            shader_effect.bind_group_layout.global_id(),
+            "Bind group layout ID changed during shader effect creation"
+        );
+
+        shader_effect
     }
 
     fn create_bind_group(
@@ -104,29 +117,16 @@ impl Effect for YuvToRgbEffect {
         input_texture_view_list: Vec<&wgpu::TextureView>,
         input_texture_list: Vec<&wgpu::Texture>,
     ) -> anyhow::Result<wgpu::BindGroup> {
-        let y_texture_view = if let Some(value) = input_texture_view_list.get(0) {
-            value
-        } else {
-            return Err(anyhow::anyhow!("Pleaase provide y_texture_view"));
-        };
-        let uv_texture_view = if let Some(value) = input_texture_view_list.get(1) {
-            value
-        } else {
-            return Err(anyhow::anyhow!("Pleaase provide uv_texture_view"));
-        };
+        effect.debug_layout();
+        let y_texture_view = input_texture_view_list[0];
+        let uv_texture_view = input_texture_view_list[1];
 
-        let y_input_texture = if let Some(value) = input_texture_list.get(0) {
-            value
-        } else {
-            return Err(anyhow::anyhow!("Pleaase provide input_texture_list"));
-        };
-        let uv_input_texture = if let Some(value) = input_texture_list.get(1) {
-            value
-        } else {
-            return Err(anyhow::anyhow!("Pleaase provide input_texture_list"));
-        };
+        println!(
+            "Creating bind group with effect layout ID: {:?}",
+            effect.bind_group_layout.global_id()
+        );
 
-        Ok(device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("yuv_to_rgb_bind_group"),
             layout: &effect.bind_group_layout,
             entries: &[
@@ -152,9 +152,22 @@ impl Effect for YuvToRgbEffect {
                         .as_entire_binding(),
                 },
             ],
-        }))
+        });
+
+        println!(
+            "Created bind group with layout ID: {:?}",
+            &effect.bind_group_layout.global_id()
+        );
+
+        Ok(bind_group)
     }
 
+    fn prepare(&mut self, effect: &mut ShaderEffect, queue: &iced_wgpu::wgpu::Queue) {
+        if let Some(uniforms) = &mut effect.uniforms {
+            uniforms.set_uniform("color_space", UniformValue::Uint(self.color_space));
+            uniforms.update_buffer(queue);
+        }
+    }
     fn update_comparison(&mut self, _: bool, _: f32) {
         // No comparison functionality needed for YUV to RGB conversion
     }

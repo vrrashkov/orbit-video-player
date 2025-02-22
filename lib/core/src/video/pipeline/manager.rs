@@ -37,6 +37,7 @@ pub struct VideoPipelineManager {
     pub effect_manager: EffectManager,
     format: wgpu::TextureFormat,
     videos: BTreeMap<u64, VideoEntry>,
+    pub effects_added: bool,
 }
 
 impl VideoPipelineManager {
@@ -44,11 +45,20 @@ impl VideoPipelineManager {
         let state = PipelineState::default();
         let video_pipeline = VideoPipeline::new(device, format);
         let line_pipeline = LinePipeline::new(device, format);
-        let texture_manager = TextureManager::new(format);
+        let mut texture_manager = TextureManager::new(format);
+
         let effect_manager = EffectManager::new();
         if !texture_manager.validate_formats() {
             println!("WARNING: Format inconsistency detected");
         }
+        // Create initial textures
+        let initial_size = wgpu::Extent3d {
+            width: 1, // Will be resized on first video
+            height: 1,
+            depth_or_array_layers: 1,
+        };
+        texture_manager.resize_intermediate_textures(device, initial_size, 1);
+
         Self {
             state,
             video_pipeline,
@@ -57,6 +67,7 @@ impl VideoPipelineManager {
             effect_manager,
             format,
             videos: BTreeMap::new(),
+            effects_added: false,
         }
     }
     pub fn resize_for_effects(&mut self, device: &wgpu::Device) {
@@ -88,16 +99,57 @@ impl VideoPipelineManager {
         output: &wgpu::Texture,
         clip: &iced::Rectangle<u32>,
         clear: bool,
+        render_target_width: f32,  // New variable
+        render_target_height: f32, // New variable
+        texture_width: f32,        // New variable
+        texture_height: f32,       // New variable
     ) {
+        println!("Effect bind group details:");
+        println!("  Output texture format: {:?}", output.format());
+        println!(
+            "  Bind group layout ID: {:?}",
+            effect.bind_group_layout.global_id()
+        );
         println!("Applying effect with:");
-        println!("  Output dimensions: {:?}", output.size());
-        println!("  Output format: {:?}", output.format());
-        println!("  Clip rect: {:?}", clip);
-
+        println!("  Effect name: {}", effect.name);
+        println!(
+            "  Effect bind group layout ID: {:?}",
+            effect.bind_group_layout.global_id()
+        );
+        println!("  Using bind group with shader: {}", effect.name);
+        // Debug the uniforms if they exist
         if let Some(uniforms) = &effect.uniforms {
             uniforms.debug_print_values();
         }
-        RenderPasses::apply_effect(effect, encoder, bind_group, output_view, clip, clear);
+
+        // Calculate scaling factors based on render target and texture dimensions
+        let scale_x = render_target_width / texture_width;
+        let scale_y = render_target_height / texture_height;
+
+        // Calculate corrected width and height for stretching the texture
+        let clip_width = clip.width as f32;
+        let clip_height = clip.height as f32;
+
+        let corrected_width = clip_width * scale_x;
+        let corrected_height = clip_height * scale_y;
+
+        // Update the effect pass by passing the adjusted values to the RenderPasses function
+        println!(
+            "Setting stretched viewport with x: {}, y: {}, width: {}, height: {}",
+            clip.x as f32, clip.y as f32, corrected_width, corrected_height
+        );
+        RenderPasses::apply_effect(
+            effect,
+            encoder,
+            bind_group,
+            output_view,
+            clip,
+            clear,
+            render_target_width,
+            render_target_height,
+            texture_width,
+            texture_height,
+        );
     }
 
     pub fn cleanup(&mut self) {
@@ -154,7 +206,17 @@ impl VideoPipelineManager {
                 height,
                 depth_or_array_layers: 1,
             };
-            self.resize_intermediate_textures(device, size);
+
+            let needs_resize = if let Some(texture) = self.texture_manager.get_texture(0) {
+                let current_size = texture.size();
+                current_size.width != width || current_size.height != height
+            } else {
+                true
+            };
+
+            if needs_resize {
+                self.resize_intermediate_textures(device, size);
+            }
         }
 
         self.video_pipeline.upload(
@@ -187,10 +249,10 @@ impl VideoPipelineManager {
             &self.state,
         );
 
-        for (effect, state) in &mut self.effect_manager.effects {
-            state.prepare(effect, queue);
+        for effect_entry in &mut self.effect_manager.effects {
+            effect_entry.state.prepare(&mut effect_entry.effect, queue);
 
-            if let Some(uniforms) = &effect.uniforms {
+            if let Some(uniforms) = &effect_entry.effect.uniforms {
                 let comparison_position = uniforms.get_float("comparison_position").unwrap_or(0.5);
                 let comparison_enabled = uniforms
                     .get_uint("comparison_enabled")
@@ -226,27 +288,31 @@ impl VideoPipelineManager {
 
             // Validate pipeline configuration
             if self.texture_manager.len() <= self.effect_manager.len()
-                || self.effect_manager.bind_groups.len() != self.effect_manager.len()
+                || self.effect_manager.bind_groups().len() != self.effect_manager.len()
             {
                 println!("Invalid texture/bind group configuration, drawing basic video");
                 self.video_pipeline.draw(target, encoder, clip, video);
                 return;
             }
 
+            println!("Input texture formats:");
+            println!("Y texture: {:?}", video.texture_y.format());
+            println!("UV texture: {:?}", video.texture_uv.format());
+
             // Debug pipeline state
             println!("Effect chain state:");
             println!("  Number of effects: {}", self.effect_manager.len());
             println!(
                 "  Number of bind groups: {}",
-                self.effect_manager.bind_groups.len()
+                self.effect_manager.bind_groups().len()
             );
             println!(
                 "  Number of intermediate textures: {}",
                 self.texture_manager.len()
             );
-
             // First pass: YUV to RGB conversion
             if let Some(input_texture) = self.texture_manager.get_texture(0) {
+                println!("Intermediate texture: {:?}", input_texture.format());
                 println!("First pass format info:");
                 println!("  Input Y format: {:?}", video.texture_y.format());
                 println!("  Input UV format: {:?}", video.texture_uv.format());
@@ -262,7 +328,20 @@ impl VideoPipelineManager {
 
                     // Create all texture views upfront
                     let mut views = Vec::new();
-                    for i in 0..=self.effect_manager.len() {
+                    for i in 0..self.effect_manager.len() {
+                        println!("Processing effect {}:", i);
+                        println!(
+                            "  Effect name: {}",
+                            self.effect_manager.effects[i].effect.name
+                        );
+                        println!(
+                            "  Layout ID: {:?}",
+                            self.effect_manager.effects[i]
+                                .effect
+                                .bind_group_layout
+                                .global_id()
+                        );
+                        println!("  Using bind group index: {}", i);
                         if let Some(texture) = self.texture_manager.get_texture(i) {
                             println!("Creating view for texture {}:", i);
                             println!("  Texture format: {:?}", texture.format());
@@ -279,11 +358,32 @@ impl VideoPipelineManager {
                         }
                     }
 
+                    // Calculate the render target and texture dimensions
+                    let render_target_width = clip.width as f32;
+                    let render_target_height = clip.height as f32;
+
+                    let texture_width = video.texture_y.size().width as f32;
+                    let texture_height = video.texture_y.size().height as f32;
+
                     // Process effects chain
                     for i in 0..self.effect_manager.len() {
-                        // Get input texture format for debugging
                         if let Some(input_tex) = self.texture_manager.get_texture(i) {
-                            println!("Effect {} input format: {:?}", i, input_tex.format());
+                            println!("Processing effect {}:", i);
+                            println!(
+                                "  Effect name: {}",
+                                self.effect_manager.effects[i].effect.name
+                            );
+                            println!(
+                                "  Effect layout ID: {:?}",
+                                self.effect_manager.effects[i]
+                                    .effect
+                                    .bind_group_layout
+                                    .global_id()
+                            );
+                            println!(
+                                "  Bind group ID: {:?}",
+                                self.effect_manager.bind_groups()[i].global_id()
+                            );
 
                             let output_view = if i == self.effect_manager.len() - 1 {
                                 target
@@ -291,20 +391,25 @@ impl VideoPipelineManager {
                                 &views[i + 1]
                             };
 
-                            // Apply effect and debug uniforms
-                            if let Some(uniforms) = &self.effect_manager.effects[i].0.uniforms {
-                                println!("Effect {} uniforms:", i);
-                                uniforms.debug_print_values();
+                            // Ensure bind group matches the effect
+                            if self.effect_manager.effects[i].effect.name == "yuv_to_rgb" {
+                                println!("  Verifying YUV to RGB bindings");
+                            } else if self.effect_manager.effects[i].effect.name == "effect" {
+                                println!("  Verifying Upscale bindings");
                             }
 
                             self.apply_effect(
                                 encoder,
-                                &self.effect_manager.effects[i].0,
-                                &self.effect_manager.bind_groups[i],
+                                &self.effect_manager.effects[i].effect,
+                                &self.effect_manager.bind_groups()[i], // Make sure this matches
                                 output_view,
                                 input_tex,
                                 clip,
                                 i < self.effect_manager.len() - 1,
+                                render_target_width,
+                                render_target_height,
+                                texture_width,
+                                texture_height,
                             );
                         }
                         println!("Effect {} complete", i);
@@ -312,8 +417,8 @@ impl VideoPipelineManager {
 
                     // Handle comparison line
                     let mut draw_comparison_line = false;
-                    if let Some((last_effect, _)) = self.effect_manager.effects.last() {
-                        if let Some(uniforms) = &last_effect.uniforms {
+                    if let Some(effect_entry) = self.effect_manager.effects.last() {
+                        if let Some(uniforms) = &effect_entry.effect.uniforms {
                             let comparison_enabled = uniforms
                                 .get_uint("comparison_enabled")
                                 .map(|v| v != 0)
@@ -457,114 +562,155 @@ impl VideoPipelineManager {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        shader_effect: ShaderEffect,
+        mut shader_effect: ShaderEffect,
         state: Box<dyn Effect>,
     ) -> anyhow::Result<()> {
         println!("Effect Addition Diagnostics:");
-        println!("  Current video entries: {}", self.videos.len());
-        let texture_size = if let Some(video) = self.videos.values().next() {
-            println!("  Y Texture Details:");
-            println!("    Format: {:?}", video.texture_y.format());
-            println!("    Size: {:?}", video.texture_y.size());
 
-            println!("  UV Texture Details:");
-            println!("    Format: {:?}", video.texture_uv.format());
-            println!("    Size: {:?}", video.texture_uv.size());
-            let extent = video.texture_y.size();
-            wgpu::Extent3d {
-                width: extent.width,
-                height: extent.height,
-                depth_or_array_layers: 1,
-            }
-        } else {
-            wgpu::Extent3d {
-                width: 1920,
-                height: 1080,
-                depth_or_array_layers: 1,
-            }
-        };
-
-        println!("Creating effect with texture size: {:?}", texture_size);
-        let previous_format = if self.effect_manager.is_empty() {
-            // If there are no previous effects, assume the format is the same as the video format
+        println!(
+            "Adding effect with layout ID: {:?}",
+            shader_effect.bind_group_layout.global_id()
+        );
+        // Get current format and texture size
+        let (previous_format, texture_size) = if self.effect_manager.is_empty() {
             if let Some(video) = self.videos.values().next() {
-                video.texture_y.format()
+                (
+                    video.texture_y.format(),
+                    wgpu::Extent3d {
+                        width: video.texture_y.size().width,
+                        height: video.texture_y.size().height,
+                        depth_or_array_layers: 1,
+                    },
+                )
             } else {
-                // Default to a fallback format if no videos are available
-                wgpu::TextureFormat::Bgra8UnormSrgb
+                return Err(anyhow::anyhow!("No video available"));
             }
         } else {
-            // Get the format of the last intermediate texture
-            self.texture_manager
+            let last_texture = self
+                .texture_manager
                 .get_texture(self.effect_manager.len() - 1)
-                .unwrap()
-                .format()
+                .unwrap();
+            (
+                last_texture.format(),
+                wgpu::Extent3d {
+                    width: last_texture.size().width,
+                    height: last_texture.size().height,
+                    depth_or_array_layers: 1,
+                },
+            )
         };
-        let required_format = shader_effect.get_format();
 
-        println!("required_format: {:?}", &required_format);
-        println!("previous_format: {:?}", &previous_format);
-        if &previous_format != required_format {
-            println!("1111111");
-            // Add the appropriate conversion effect based on the previous and required formats
+        let required_format = shader_effect.get_format().to_owned();
+
+        // Handle YUV to RGB conversion if needed
+        if previous_format != required_format {
             match (previous_format, required_format) {
                 (wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb) => {
-                    // Add YUV to RGB conversion effect
-                    println!("Adding YUV to RGB conversion effect");
-                    let mut yuv_to_rgb_effect = YuvToRgbEffect::new(
-                        0, // BT.709 color space
-                        wgpu::TextureFormat::Bgra8UnormSrgb,
+                    // Create YUV to RGB conversion effect
+                    let mut yuv_to_rgb_effect =
+                        YuvToRgbEffect::new(0, wgpu::TextureFormat::Bgra8UnormSrgb);
+                    let yuv_shader = yuv_to_rgb_effect.add(device, queue);
+
+                    // Store the layout from the shader effect
+                    let yuv_layout = &yuv_shader.bind_group_layout;
+
+                    // Prepare textures for YUV conversion
+                    self.texture_manager.resize_intermediate_textures(
+                        device,
+                        texture_size,
+                        self.effect_manager.len() + 1,
                     );
-                    let yuv_to_rgb_shader_effect = yuv_to_rgb_effect.add(device, queue);
+
+                    // Get video for YUV conversion
+                    let video =
+                        self.videos.values().next().ok_or_else(|| {
+                            anyhow::anyhow!("No video available for YUV conversion")
+                        })?;
+
+                    // Create views for Y and UV textures
+                    let y_view = video.texture_y.create_view(&Default::default());
+                    let uv_view = video.texture_uv.create_view(&Default::default());
+
+                    // Get output texture for YUV conversion
+                    let output_texture = self
+                        .texture_manager
+                        .get_texture(self.effect_manager.len())
+                        .ok_or_else(|| anyhow::anyhow!("Failed to get output texture"))?;
+
+                    // Create bind group using the saved layout
+                    let yuv_bind_group = yuv_to_rgb_effect.create_bind_group(
+                        device,
+                        &yuv_shader, // Pass shader with the original layout
+                        vec![&y_view, &uv_view],
+                        vec![output_texture],
+                    )?;
+
+                    println!("Adding YUV to RGB conversion effect");
+                    println!("  Layout ID: {:?}", yuv_layout.global_id());
+
+                    // Add YUV conversion effect and bind group
+                    let layout_id = yuv_shader.bind_group_layout.global_id();
+
                     self.effect_manager
-                        .add_effect(yuv_to_rgb_shader_effect, Box::new(yuv_to_rgb_effect));
+                        .add_effect(yuv_shader, Box::new(yuv_to_rgb_effect));
+                    self.effect_manager
+                        .add_bind_group(yuv_bind_group, layout_id);
                 }
                 _ => {
-                    println!("33333");
-                    // Unsupported format conversion
                     return Err(anyhow::anyhow!(
                         "Unsupported format conversion: {:?} to {:?}",
                         previous_format,
                         required_format
-                    ));
+                    ))
                 }
             }
         }
-        // Resize textures first
+
+        // Add the main effect
         self.texture_manager.resize_intermediate_textures(
             device,
             texture_size,
             self.effect_manager.len() + 1,
         );
 
-        // Get input texture view with explicit descriptor
+        // Store the main effect layout
+        let main_layout = &shader_effect.bind_group_layout;
 
-        if let Some(texture) = self.texture_manager.get_texture(self.effect_manager.len()) {
-            if let Some(input_view) = self
-                .texture_manager
-                .create_texture_view(self.effect_manager.len())
-            {
-                // Create bind group with new texture view
-                let bind_group = state.create_bind_group(
-                    device,
-                    &shader_effect,
-                    vec![&input_view],
-                    vec![texture],
-                )?;
+        // Get input and output textures for the main effect
+        let texture = self
+            .texture_manager
+            .get_texture(self.effect_manager.len())
+            .ok_or_else(|| anyhow::anyhow!("Failed to get texture"))?;
 
-                // Add effect and bind group
-                self.effect_manager.add_effect(shader_effect, state);
-                self.effect_manager.add_bind_group(bind_group);
-            }
-        }
+        let prev_texture = self
+            .texture_manager
+            .get_texture(self.effect_manager.len() - 1)
+            .ok_or_else(|| anyhow::anyhow!("Failed to get previous texture"))?;
 
-        println!("Added effect. Current state:");
+        let input_view = prev_texture.create_view(&Default::default());
+
+        println!("Creating main effect bind group");
+        println!("  Layout ID: {:?}", main_layout.global_id());
+
+        // // ADD MORE EFFECTS
+        // // Create bind group using the saved layout
+        // let bind_group = state.create_bind_group(
+        //     device,
+        //     &shader_effect, // Pass shader with the original layout
+        //     vec![&input_view],
+        //     vec![texture],
+        // )?;
+
+        // // Add main effect and bind group
+        // let layout_id = shader_effect.bind_group_layout.global_id();
+
+        // self.effect_manager.add_effect(shader_effect, state);
+        // self.effect_manager.add_bind_group(bind_group, layout_id);
+        // // END DD MORE EFFECTS
+        println!("Final state:");
         println!("  Effects count: {}", self.effect_manager.len());
-        println!(
-            "  Bind groups count: {}",
-            self.effect_manager.bind_groups.len()
-        );
         println!("  Intermediate textures: {}", self.texture_manager.len());
+
         Ok(())
     }
 }

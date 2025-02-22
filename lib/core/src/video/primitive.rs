@@ -2,8 +2,10 @@ use ffmpeg_next::color::{self, Space};
 use iced_wgpu::primitive::Primitive;
 use iced_wgpu::wgpu;
 use std::{
+    cell::RefCell,
     collections::{btree_map::Entry, BTreeMap},
     num::NonZero,
+    rc::Rc,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -57,6 +59,7 @@ impl VideoPrimitive {
         self
     }
 }
+static FRAME_COUNT: AtomicUsize = AtomicUsize::new(0);
 impl Primitive for VideoPrimitive {
     fn prepare(
         &self,
@@ -67,14 +70,20 @@ impl Primitive for VideoPrimitive {
         bounds: &iced::Rectangle,
         viewport: &iced_wgpu::graphics::Viewport,
     ) {
+        let current_frame = FRAME_COUNT.fetch_add(1, Ordering::SeqCst);
+
+        // For testing
+        if current_frame >= 3 {
+            // 0-indexed, so 1 means 2 frames
+            // std::process::exit(0); // Forcefully exit the program
+        }
         dbg!("testttttt 1111");
         let has_manager = storage.has::<VideoPipelineManager>();
         dbg!("Has VideoPipelineManager:", has_manager);
+
         if !has_manager {
             dbg!("Creating new pipeline manager");
-            let mut pipeline_manager = VideoPipelineManager::new(device, format);
-
-            println!("Effect added to pipeline manager");
+            let pipeline_manager = VideoPipelineManager::new(device, format);
             storage.store(pipeline_manager);
         }
 
@@ -92,32 +101,46 @@ impl Primitive for VideoPrimitive {
             );
         }
 
-        // ADD EFFECTS AFTER FRAME
-        // Add debug prints
-        println!("Creating upscale effect");
-        let mut upscale_effect = UpscaleEffect {
-            state: UpscaleEffectState {
-                comparison_enabled: self.comparison_enabled,
-                comparison_position: self.comparison_position,
-                color_threshold: 1.,
-                color_blend_mode: 0.5,
-            },
-            format,
+        // Check if effects have already been added
+        if !pipeline_manager.effects_added {
+            // ADD EFFECTS AFTER FRAME
+            println!("Creating upscale effect");
+            let mut upscale_effect = UpscaleEffect {
+                state: UpscaleEffectState {
+                    comparison_enabled: self.comparison_enabled,
+                    comparison_position: self.comparison_position,
+                    color_threshold: 1.,
+                    color_blend_mode: 0.5,
+                },
+                format,
+            };
+
+            println!("Adding shader effect");
+            let upscale_shader_effect = upscale_effect.add(device, queue);
+            println!("Effect created successfully");
+
+            pipeline_manager
+                .add_effect(
+                    device,
+                    queue,
+                    upscale_shader_effect,
+                    Box::new(upscale_effect),
+                )
+                .unwrap();
+            ///// END EFFECTS
+            pipeline_manager.effects_added = true;
+        }
+
+        let physical_size = viewport.physical_size();
+        // Resize textures to match viewport
+        let size = wgpu::Extent3d {
+            width: physical_size.width,
+            height: physical_size.height,
+            depth_or_array_layers: 1,
         };
-
-        println!("Adding shader effect");
-        let upscale_shader_effect = upscale_effect.add(device, queue);
-        println!("Effect created successfully");
-
         pipeline_manager
-            .add_effect(
-                device,
-                queue,
-                upscale_shader_effect,
-                Box::new(upscale_effect),
-            )
-            .unwrap();
-        ///// END EFFECTS
+            .texture_manager
+            .resize_intermediate_textures(device, size, pipeline_manager.effect_manager.len() + 1);
         // Prepare for rendering
         pipeline_manager.prepare(
             device,
@@ -125,18 +148,21 @@ impl Primitive for VideoPrimitive {
             self.video_id,
             &(*bounds
                 * iced::Transformation::orthographic(
-                    viewport.logical_size().width as _,
-                    viewport.logical_size().height as _,
+                    physical_size.width as _,
+                    physical_size.height as _,
                 )),
             self.color_space,
         );
+
+        // Update and prepare effects
         for effect in &mut pipeline_manager.effect_manager.effects {
             effect
-                .1
+                .state
                 .as_mut()
                 .update_comparison(self.comparison_enabled, self.comparison_position);
-            effect.1.as_mut().prepare(&mut effect.0, queue);
+            effect.state.as_mut().prepare(&mut effect.effect, queue);
         }
+
         // Debug prints
         println!("Effects count: {}", pipeline_manager.has_effects());
         println!(

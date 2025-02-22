@@ -60,11 +60,24 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 }
 @fragment
 fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
-    // Sample Y and UV planes
     let y = textureSample(input_texture_y, s_sampler, tex_coords).r;
     let uv = textureSample(input_texture_uv, s_sampler, tex_coords).rg;
     
-    // Convert based on color space
+    // Debug out-of-range values with different colors
+    if (y < 16.0/255.0) {
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0);  // Red for too-dark Y
+    }
+    if (y > 235.0/255.0) {
+        return vec4<f32>(0.0, 1.0, 0.0, 1.0);  // Green for too-bright Y
+    }
+    
+    // Check UV components separately
+    let uv_min = 16.0/255.0;
+    let uv_max = 240.0/255.0;
+    if (uv.r < uv_min || uv.r > uv_max || uv.g < uv_min || uv.g > uv_max) {
+        return vec4<f32>(0.0, 0.0, 1.0, 1.0);  // Blue for invalid UV
+    }
+
     var rgb: vec3<f32>;
     switch (uniforms.color_space) {
         case 0u: { // BT.709
@@ -78,7 +91,17 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
         }
     }
     
-    // Return as RGB texture
+    // Debug conversion output
+    if (rgb.r < 0.0 || rgb.g < 0.0 || rgb.b < 0.0) {
+        return vec4<f32>(1.0, 0.5, 0.0, 1.0);  // Orange for negative RGB
+    }
+    if (rgb.r > 1.0 || rgb.g > 1.0 || rgb.b > 1.0) {
+        return vec4<f32>(0.5, 0.0, 1.0, 1.0);  // Purple for >1.0 RGB
+    }
+    if (rgb.r == 0.0 && rgb.g == 0.0 && rgb.b == 0.0) {
+        return vec4<f32>(0.5, 0.5, 0.5, 1.0);  // Gray for zero RGB
+    }
+
     return vec4<f32>(
         clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 
         1.0

@@ -191,6 +191,9 @@ impl VideoPipeline {
             (uniform_size + uniform_alignment - 1) & !(uniform_alignment - 1);
 
         if let Entry::Vacant(entry) = videos.entry(video_id) {
+            println!("Uploading new frame data:");
+            println!("  Video ID: {}", video_id);
+            println!("  Frame size: {}x{}", width, height);
             let texture_y = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("video_texture_y"),
                 size: wgpu::Extent3d {
@@ -325,6 +328,11 @@ impl VideoPipeline {
         state: &PipelineState,
     ) {
         if let Some(video) = videos.get_mut(&video_id) {
+            let prepare_index = video.prepare_index.load(Ordering::Relaxed);
+            println!("Preparing frame:");
+            println!("  Video ID: {}", video_id);
+            println!("  Prepare index: {}", prepare_index);
+
             let config = match color_space {
                 ffmpeg_next::color::Space::BT709 => BT709_CONFIG,
                 _ => BT709_CONFIG,
@@ -349,7 +357,7 @@ impl VideoPipeline {
             );
 
             video.prepare_index.fetch_add(1, Ordering::Relaxed);
-            video.render_index.store(0, Ordering::Relaxed);
+            // video.render_index.store(0, Ordering::Relaxed);
         }
     }
 }
