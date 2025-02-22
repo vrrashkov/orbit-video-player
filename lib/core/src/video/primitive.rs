@@ -9,6 +9,7 @@ use std::{
 
 use crate::video::pipeline::effects::{
     upscale::{UpscaleEffect, UpscaleEffectState},
+    yuv_to_rgb::YuvToRgbEffect,
     Effect,
 };
 
@@ -70,29 +71,10 @@ impl Primitive for VideoPrimitive {
         let has_manager = storage.has::<VideoPipelineManager>();
         dbg!("Has VideoPipelineManager:", has_manager);
         if !has_manager {
-            dbg!("testttttt 2222");
+            dbg!("Creating new pipeline manager");
             let mut pipeline_manager = VideoPipelineManager::new(device, format);
 
-            // UPSCALE SHADER EFFECT
-            let mut upscale_effect = UpscaleEffect {
-                state: UpscaleEffectState {
-                    comparison_enabled: self.comparison_enabled,
-                    comparison_position: self.comparison_position,
-                    color_threshold: 1.,
-                    color_blend_mode: 0.5,
-                },
-                format,
-            };
-
-            dbg!("upscale_effect", &upscale_effect);
-            let upscale_shader_effect = upscale_effect.add(device, queue);
-            pipeline_manager.add_effect(
-                device,
-                queue,
-                upscale_shader_effect,
-                Box::new(upscale_effect),
-            );
-            //
+            println!("Effect added to pipeline manager");
             storage.store(pipeline_manager);
         }
 
@@ -110,6 +92,32 @@ impl Primitive for VideoPrimitive {
             );
         }
 
+        // ADD EFFECTS AFTER FRAME
+        // Add debug prints
+        println!("Creating upscale effect");
+        let mut upscale_effect = UpscaleEffect {
+            state: UpscaleEffectState {
+                comparison_enabled: self.comparison_enabled,
+                comparison_position: self.comparison_position,
+                color_threshold: 1.,
+                color_blend_mode: 0.5,
+            },
+            format,
+        };
+
+        println!("Adding shader effect");
+        let upscale_shader_effect = upscale_effect.add(device, queue);
+        println!("Effect created successfully");
+
+        pipeline_manager
+            .add_effect(
+                device,
+                queue,
+                upscale_shader_effect,
+                Box::new(upscale_effect),
+            )
+            .unwrap();
+        ///// END EFFECTS
         // Prepare for rendering
         pipeline_manager.prepare(
             device,

@@ -133,18 +133,70 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
 fn get_luma(color: vec4<f32>) -> f32 {
     return dot(color.rgb, vec3<f32>(0.299, 0.587, 0.114));
 }
+@fragment
+fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
+    // Texture size and dimension checks
+    let tex_size = textureDimensions(input_texture);
+    
+    // Extensive diagnostic logging
+    if (tex_size.x == 0u || tex_size.y == 0u) {
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0); // Red for invalid texture size
+    }
+
+    // Safe UV clamping
+    let safe_uv = clamp(tex_coords, vec2<f32>(0.0), vec2<f32>(1.0));
+    
+    // Sample the texture
+    let color = textureSample(input_texture, s_sampler, safe_uv);
+    
+    // Detailed color diagnostics
+    let r = color.r;
+    let g = color.g;
+    let b = color.b;
+    let color_intensity = length(color.rgb);
+
+    // Diagnostic for zero values
+    if (r == 0.0 && g == 0.0 && b == 0.0) {
+        // More informative diagnostic for zero values
+        return vec4<f32>(
+            0.5,  // Mid-tone red
+            0.0,  // No green
+            0.5,  // Mid-tone blue
+            1.0
+        );
+    }
+
+    // Intensity check with more nuanced output
+    if (color_intensity < 0.001) {
+        // Showcase actual color values
+        return vec4<f32>(
+            abs(r) * 5.0,   // Amplified red
+            abs(g) * 5.0,   // Amplified green
+            abs(b) * 5.0,   // Amplified blue
+            1.0
+        );
+    }
+
+    // Normal processing
+    let processed_color = apply_upscale(color, safe_uv);
+    
+    return processed_color;
+}
 
 fn apply_upscale(color: vec4<f32>, tex_coords: vec2<f32>) -> vec4<f32> {
+    // Color processing with additional safety checks
     let processed_color = apply_color_processing(color);
+    
     let tex_size = textureDimensions(input_texture);
     let pixel_size = 1.0 / vec2<f32>(tex_size);
     
-    let l = textureSample(input_texture, s_sampler, tex_coords + vec2<f32>(-pixel_size.x, 0.0));
-    let r = textureSample(input_texture, s_sampler, tex_coords + vec2<f32>(pixel_size.x, 0.0));
-    let t = textureSample(input_texture, s_sampler, tex_coords + vec2<f32>(0.0, -pixel_size.y));
-    let b = textureSample(input_texture, s_sampler, tex_coords + vec2<f32>(0.0, pixel_size.y));
+    // Sample neighboring pixels with boundary checks
+    let l = safe_texture_sample(input_texture, s_sampler, tex_coords + vec2<f32>(-pixel_size.x, 0.0));
+    let r = safe_texture_sample(input_texture, s_sampler, tex_coords + vec2<f32>(pixel_size.x, 0.0));
+    let t = safe_texture_sample(input_texture, s_sampler, tex_coords + vec2<f32>(0.0, -pixel_size.y));
+    let b = safe_texture_sample(input_texture, s_sampler, tex_coords + vec2<f32>(0.0, pixel_size.y));
 
-    // Edge detection
+    // Edge detection with additional robustness
     let luma_c = get_luma(processed_color);
     let luma_l = get_luma(l);
     let luma_r = get_luma(r);
@@ -154,54 +206,37 @@ fn apply_upscale(color: vec4<f32>, tex_coords: vec2<f32>) -> vec4<f32> {
     let grad_x = abs(luma_r - luma_l);
     let grad_y = abs(luma_t - luma_b);
 
-    let strength = 1.0;
     let edge_threshold = 0.05;
     let edge = sqrt(grad_x * grad_x + grad_y * grad_y);
 
     var output_color = processed_color;
     
     if (edge > edge_threshold) {
-        // Edge enhancement
-        let enhance_factor = 1.2;  // Increase contrast at edges
+        // Edge enhancement with clamping
+        let enhance_factor = 1.2;
         output_color = vec4<f32>(
-            output_color.r * enhance_factor,
-            output_color.g * enhance_factor,
-            output_color.b * enhance_factor,
+            min(output_color.r * enhance_factor, 1.0),
+            min(output_color.g * enhance_factor, 1.0),
+            min(output_color.b * enhance_factor, 1.0),
             output_color.a
         );
     }
 
-    // Final adjustments
+    // Final adjustments with additional safety
     let gamma = 0.95;
     let brightness = 1.05;
     
     return vec4<f32>(
-        pow(output_color.r * brightness, gamma),
-        pow(output_color.g * brightness, gamma),
-        pow(output_color.b * brightness, gamma),
+        clamp(pow(output_color.r * brightness, gamma), 0.0, 1.0),
+        clamp(pow(output_color.g * brightness, gamma), 0.0, 1.0),
+        clamp(pow(output_color.b * brightness, gamma), 0.0, 1.0),
         output_color.a
     );
 }
 
-@fragment
-fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
-    let color = textureSample(input_texture, s_sampler, tex_coords);
-    
-    // Debug visualization
-    if uniforms.comparison_enabled == 1u {
-        // Add a visible split line
-        let split_width = 0.005; // Make it wider for visibility
-        if abs(tex_coords.x - uniforms.comparison_position) < split_width {
-            return vec4<f32>(1.0, 0.0, 0.0, 1.0); // Bright red line
-        }
-        
-        // Tint the sides slightly to see the split
-        if tex_coords.x > uniforms.comparison_position {
-            return color * vec4<f32>(1.0, 0.9, 0.9, 1.0); // Slight red tint for original
-        } else {
-            return apply_upscale(color, tex_coords) * vec4<f32>(0.9, 1.0, 0.9, 1.0); // Slight green tint for processed
-        }
-    }
-    
-    return apply_upscale(color, tex_coords);
+// Safe texture sampling to prevent out-of-bounds access
+fn safe_texture_sample(tex: texture_2d<f32>, s: sampler, uv: vec2<f32>) -> vec4<f32> {
+    let tex_size = textureDimensions(tex);
+    let safe_uv = clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    return textureSample(tex, s, safe_uv);
 }

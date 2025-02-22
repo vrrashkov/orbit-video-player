@@ -2,15 +2,15 @@ use iced_wgpu::wgpu;
 
 use super::PipelineConfig;
 // Line-specific uniforms
-#[repr(C)]
+#[repr(C, align(16))] // Add explicit alignment
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct LineUniforms {
-    pub position: f32,
-    pub bounds: [f32; 4], // x, y, width, height
-    pub line_width: f32,
-    pub _pad: [f32; 3], // Pad to make total size 64 bytes
+    pub position: f32,    // 4 bytes
+    pub _pad1: [f32; 3],  // 12 bytes padding for alignment
+    pub bounds: [f32; 4], // 16 bytes (vec4 in shader)
+    pub line_width: f32,  // 4 bytes
+    pub _pad2: [f32; 7],  // 28 bytes padding to reach 64 total
 }
-
 pub struct LinePipeline {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -140,7 +140,7 @@ impl LinePipeline {
     pub fn create_uniform_buffer(device: &wgpu::Device) -> wgpu::Buffer {
         device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("line_uniform_buffer"),
-            size: std::mem::size_of::<LineUniforms>() as u64,
+            size: 64, // Explicit size of 64 bytes
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         })
@@ -194,10 +194,11 @@ impl LinePipeline {
 
     pub fn prepare(&self, queue: &wgpu::Queue, bounds: &iced::Rectangle, position: f32) {
         let uniforms = LineUniforms {
-            position: position * 2.0 - 1.0, // This conversion is correct
+            position: position * 2.0 - 1.0,
+            _pad1: [0.0; 3],
             bounds: [bounds.x, bounds.y, bounds.width, bounds.height],
-            line_width: 2.0, // Fixed pixel width instead of relative
-            _pad: [0.0; 3],  // Changed to 3 elements
+            line_width: 2.0,
+            _pad2: [0.0; 7],
         };
 
         println!("Line Uniform Debug:");
@@ -207,6 +208,7 @@ impl LinePipeline {
             uniforms.bounds[0], uniforms.bounds[1], uniforms.bounds[2], uniforms.bounds[3]
         );
         println!("  Line width: {}", uniforms.line_width);
+        println!("  Total size: {}", std::mem::size_of::<LineUniforms>());
 
         self.update_uniforms(queue, &self.uniform_buffer, &uniforms);
     }

@@ -13,14 +13,21 @@ use std::{
 use super::manager::VideoPipelineManager;
 
 pub mod upscale;
+pub mod yuv_to_rgb;
 
 pub trait Effect: Send + Sync {
     fn add(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> ShaderEffect;
     fn prepare(&mut self, effect: &mut ShaderEffect, queue: &wgpu::Queue);
+    fn create_bind_group(
+        &self,
+        device: &wgpu::Device,
+        effect: &ShaderEffect,
+        input_texture_view: Vec<&wgpu::TextureView>,
+        input_texture: Vec<&wgpu::Texture>,
+    ) -> anyhow::Result<wgpu::BindGroup>;
     fn update_comparison(&mut self, comparison_enabled: bool, comparison_position: f32);
     fn clone_box(&self) -> Box<dyn Effect>;
 }
-
 pub struct EffectManager {
     pub effects: Vec<(ShaderEffect, Box<dyn Effect>)>,
     pub bind_groups: Vec<wgpu::BindGroup>,

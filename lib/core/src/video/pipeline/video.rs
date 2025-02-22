@@ -156,6 +156,15 @@ impl VideoPipeline {
         clip: &iced::Rectangle<u32>,
         video: &VideoEntry,
     ) {
+        println!("Video pipeline draw_clear:");
+        println!("  Target texture format: {:?}", target);
+        println!("  Video Y texture format: {:?}", video.texture_y.format());
+        println!("  Video UV texture format: {:?}", video.texture_uv.format());
+        println!(
+            "  First video frame: {}",
+            std::any::type_name_of_val(&video)
+        );
+        println!("  Clip rect: {:?}", clip);
         RenderPasses::draw_video_pass(
             &self.pipeline,
             target,
@@ -321,6 +330,8 @@ impl VideoPipeline {
                 _ => BT709_CONFIG,
             };
 
+            println!("Color Space Details:");
+            println!("  Color Space: {:?}", color_space);
             let uniforms = Uniforms {
                 rect: [bounds.x, bounds.y, bounds.width, bounds.height],
                 color_space: [color_space as u32],

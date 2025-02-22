@@ -159,6 +159,7 @@ pub struct ShaderEffectBuilder {
     uniforms: Option<ShaderUniforms>,
     pending_uniforms: HashMap<String, UniformValue>,
     texture_bindings: Vec<wgpu::BindGroupLayoutEntry>,
+    bind_group_layout: Option<wgpu::BindGroupLayout>,
     sampler_bindings: Vec<wgpu::BindGroupLayoutEntry>,
 }
 
@@ -168,6 +169,7 @@ impl ShaderEffectBuilder {
             name: name.to_string(),
             shader_source: String::new(),
             uniforms: None,
+            bind_group_layout: None,
             pending_uniforms: HashMap::new(),
             texture_bindings: Vec::new(),
             sampler_bindings: Vec::new(),
@@ -180,6 +182,15 @@ impl ShaderEffectBuilder {
     }
     pub fn with_uniform(mut self, name: &str, value: UniformValue) -> Self {
         self.pending_uniforms.insert(name.to_string(), value);
+        self
+    }
+
+    pub fn with_bind_group_layout(mut self, layout: wgpu::BindGroupLayout) -> Self {
+        self.bind_group_layout = Some(layout);
+        self
+    }
+    pub fn with_uniforms(mut self, uniforms: ShaderUniforms) -> Self {
+        self.uniforms = Some(uniforms);
         self
     }
 
@@ -204,71 +215,74 @@ impl ShaderEffectBuilder {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) -> ShaderEffect {
-        // Create uniforms first so we can use it in the layout
-        let uniforms = if !self.pending_uniforms.is_empty() {
-            let mut shader_uniforms = ShaderUniforms::new(device, 2);
-            for (name, value) in self.pending_uniforms {
-                shader_uniforms.set_uniform(&name, value);
-            }
-            shader_uniforms.update_buffer(queue);
-            Some(shader_uniforms)
-        } else {
-            // Create empty uniforms anyway since the shader requires it
-            let shader_uniforms = ShaderUniforms::new(device, 2);
-            Some(shader_uniforms)
-        };
-
-        // Define all required bindings
-        let bind_group_layout_entries = vec![
-            // Texture binding (0)
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            // Sampler binding (1)
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-            // Uniform binding (2)
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ];
-
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some(&format!("{}_bind_group_layout", self.name)),
-            entries: &bind_group_layout_entries,
+        // Create sampler first
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some(&format!("{}_sampler", self.name)),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 1.0,
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
         });
 
-        // Rest of your pipeline creation...
+        // Create uniforms
+        let uniforms = self
+            .uniforms
+            .or_else(|| Some(ShaderUniforms::new(device, 2)));
+
+        // Create bind group layout
+        // let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        //     label: Some(&format!("{}_bind_group_layout", self.name)),
+        //     entries: &[
+        //         wgpu::BindGroupLayoutEntry {
+        //             binding: 0,
+        //             visibility: wgpu::ShaderStages::FRAGMENT,
+        //             ty: wgpu::BindingType::Texture {
+        //                 sample_type: wgpu::TextureSampleType::Float { filterable: true },
+        //                 view_dimension: wgpu::TextureViewDimension::D2,
+        //                 multisampled: false,
+        //             },
+        //             count: None,
+        //         },
+        //         wgpu::BindGroupLayoutEntry {
+        //             binding: 1,
+        //             visibility: wgpu::ShaderStages::FRAGMENT,
+        //             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        //             count: None,
+        //         },
+        //         wgpu::BindGroupLayoutEntry {
+        //             binding: 2,
+        //             visibility: wgpu::ShaderStages::FRAGMENT,
+        //             ty: wgpu::BindingType::Buffer {
+        //                 ty: wgpu::BufferBindingType::Uniform,
+        //                 has_dynamic_offset: false,
+        //                 min_binding_size: Some(NonZero::new(16).unwrap()),
+        //             },
+        //             count: None,
+        //         },
+        //     ],
+        // });
+
+        println!("Created bind group layout");
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(&format!("{}_shader", self.name)),
             source: wgpu::ShaderSource::Wgsl(self.shader_source.into()),
         });
 
+        let bind_layout_group = self.bind_group_layout.unwrap();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&format!("{}_pipeline_layout", self.name)),
-            bind_group_layouts: &[&bind_group_layout],
+            bind_group_layouts: &[&bind_layout_group],
             push_constant_ranges: &[],
         });
 
-        // Create the pipeline
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(&format!("{}_pipeline", self.name)),
             layout: Some(&pipeline_layout),
@@ -295,8 +309,10 @@ impl ShaderEffectBuilder {
         ShaderEffect {
             name: self.name,
             pipeline,
-            bind_group_layout,
+            bind_group_layout: bind_layout_group,
+            format,
             uniforms,
+            sampler,
         }
     }
 }
@@ -307,6 +323,8 @@ pub struct ShaderEffect {
     pub pipeline: wgpu::RenderPipeline,
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub uniforms: Option<ShaderUniforms>,
+    pub sampler: wgpu::Sampler,
+    pub format: wgpu::TextureFormat,
 }
 
 impl ShaderEffect {
@@ -320,6 +338,9 @@ impl ShaderEffect {
 
     pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.bind_group_layout
+    }
+    pub fn get_format(&self) -> &wgpu::TextureFormat {
+        &self.format
     }
 
     pub fn update_uniform(&mut self, name: &str, value: UniformValue, queue: &wgpu::Queue) {

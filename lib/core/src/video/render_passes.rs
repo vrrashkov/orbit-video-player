@@ -54,6 +54,22 @@ impl RenderPasses {
             // For final render to target, use UI coordinates
             pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
         }
+        println!("Video pass vertices:");
+        let vertices = [
+            (-1.0, -1.0, 0.0, 1.0), // Position, UV
+            (1.0, -1.0, 1.0, 1.0),
+            (-1.0, 1.0, 0.0, 0.0),
+            (-1.0, 1.0, 0.0, 0.0),
+            (1.0, -1.0, 1.0, 1.0),
+            (1.0, 1.0, 1.0, 0.0),
+        ];
+
+        for (i, v) in vertices.iter().enumerate() {
+            println!(
+                "  Vertex {}: pos({}, {}), uv({}, {})",
+                i, v.0, v.1, v.2, v.3
+            );
+        }
         pass.draw(0..6, 0..1);
 
         video.prepare_index.store(0, Ordering::Relaxed);
@@ -62,12 +78,21 @@ impl RenderPasses {
 
     pub fn apply_effect(
         effect: &ShaderEffect,
-        encoder: &mut CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         bind_group: &wgpu::BindGroup,
-        output: &TextureView,
-        clip: &Rectangle<u32>,
+        output: &wgpu::TextureView,
+        clip: &iced::Rectangle<u32>,
         clear: bool,
     ) {
+        println!("Apply effect debug:");
+        println!("  Effect name: {}", effect.name);
+        println!("  Clear: {}", clear);
+
+        // Debug the bind group
+        if let Some(uniforms) = &effect.uniforms {
+            println!("  Uniform buffer size: {}", uniforms.buffer().size());
+        }
+
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("effect_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -75,8 +100,10 @@ impl RenderPasses {
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: if clear {
+                        println!("  Using clear load op");
                         wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT)
                     } else {
+                        println!("  Using load load op");
                         wgpu::LoadOp::Load
                     },
                     store: wgpu::StoreOp::Store,
@@ -87,13 +114,40 @@ impl RenderPasses {
             occlusion_query_set: None,
         });
 
+        // Set viewport and scissor
+
+        pass.set_viewport(0.0, 0.0, clip.width as f32, clip.height as f32, 0.0, 1.0);
+        pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
+
+        println!("Setting pipeline");
         pass.set_pipeline(&effect.pipeline);
+
+        println!("Setting bind group at index 0");
         pass.set_bind_group(0, bind_group, &[]);
-        if clear {
-            pass.set_scissor_rect(0, 0, clip.width, clip.height);
-        } else {
-            pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
+        println!("Effect pass vertices:");
+        let vertices = [
+            (-1.0, -1.0, 0.0, 1.0),
+            (1.0, -1.0, 1.0, 1.0),
+            (-1.0, 1.0, 0.0, 0.0),
+            (-1.0, 1.0, 0.0, 0.0),
+            (1.0, -1.0, 1.0, 1.0),
+            (1.0, 1.0, 1.0, 0.0),
+        ];
+        for (i, v) in vertices.iter().enumerate() {
+            println!(
+                "  Vertex {}: pos({}, {}), uv({}, {})",
+                i, v.0, v.1, v.2, v.3
+            );
         }
+
+        // Add viewport debug info
+        println!("Effect viewport:");
+        println!("  Clip: {:?}", clip);
+        println!(
+            "  Viewport: 0.0, 0.0, {}, {}, 0.0, 1.0",
+            clip.width, clip.height
+        );
+
         pass.draw(0..6, 0..1);
     }
 }

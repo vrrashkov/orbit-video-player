@@ -1,5 +1,3 @@
-use std::fs;
-
 use super::Effect;
 use crate::video::{
     pipeline::manager::VideoPipelineManager,
@@ -7,11 +5,14 @@ use crate::video::{
     ShaderEffect,
 };
 use iced_wgpu::wgpu;
+use std::{fs, num::NonZero};
+
 #[derive(Clone, Debug)]
 pub struct UpscaleEffect {
     pub state: UpscaleEffectState,
     pub format: wgpu::TextureFormat,
 }
+
 #[derive(Clone, Debug)]
 pub struct UpscaleEffectState {
     pub comparison_enabled: bool,
@@ -19,6 +20,7 @@ pub struct UpscaleEffectState {
     pub color_threshold: f32,
     pub color_blend_mode: f32,
 }
+
 impl Default for UpscaleEffectState {
     fn default() -> Self {
         Self {
@@ -60,12 +62,55 @@ impl Effect for UpscaleEffect {
         // Update the buffer with initial values
         shader_uniforms.update_buffer(queue);
 
+        let shader_source = include_str!("../../../../../../assets/shaders/upscale_v1.wgsl");
+        println!("Shader source loaded: {}", shader_source.len() > 0);
+
+        // Create bind group layout
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("upscale_bind_group_layout"),
+            entries: &[
+                // @binding(0) var input_texture: texture_2d<f32>
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // @binding(1) var s_sampler: sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // @binding(2) var<uniform> uniforms: ShaderUniforms
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(NonZero::new(16).unwrap()), // size of ShaderUniforms
+                    },
+                    count: None,
+                },
+            ],
+        });
+
+        println!("Created bind group layout");
+
+        println!("  Current format SHADER: {:?}", self.format);
         let shader_effect = ShaderEffectBuilder::new("effect")
-            .with_shader_source(
-                include_str!("../../../../../../assets/shaders/upscale_v1.wgsl").into(),
-            )
+            .with_shader_source(shader_source.into())
+            .with_bind_group_layout(bind_group_layout)
+            .with_uniforms(shader_uniforms)
             .build(device, queue, self.format);
 
+        println!("Created shader effect");
         shader_effect
     }
 
@@ -92,6 +137,62 @@ impl Effect for UpscaleEffect {
             uniforms.validate_layout();
             uniforms.update_buffer(queue);
         }
+    }
+    fn create_bind_group(
+        &self,
+        device: &wgpu::Device,
+        effect: &ShaderEffect,
+        input_texture_view_list: Vec<&wgpu::TextureView>,
+        input_texture_list: Vec<&wgpu::Texture>,
+    ) -> anyhow::Result<wgpu::BindGroup> {
+        let input_texture_view = if let Some(value) = input_texture_view_list.get(0) {
+            value
+        } else {
+            return Err(anyhow::anyhow!("Pleaase provide input_texture_view"));
+        };
+
+        let input_texture = if let Some(value) = input_texture_list.get(0) {
+            value
+        } else {
+            return Err(anyhow::anyhow!("Pleaase provide input_texture"));
+        };
+
+        println!("Creating bind group:");
+        println!("  Sampler: {:?}", effect.sampler);
+        println!(
+            "  Uniform buffer size: {:?}",
+            effect.uniforms.as_ref().unwrap().buffer().size()
+        );
+        println!("Creating bind group for effect:");
+        println!("  Input texture dimensions: {:?}", input_texture.size());
+        println!("  Input texture format: {:?}", input_texture.format());
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("upscale_bind_group"),
+            layout: &effect.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(input_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&effect.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: effect
+                        .uniforms
+                        .as_ref()
+                        .unwrap()
+                        .buffer()
+                        .as_entire_binding(),
+                },
+            ],
+        });
+
+        println!("Created bind group");
+        Ok(bind_group)
     }
 
     fn update_comparison(&mut self, comparison_enabled: bool, comparison_position: f32) {

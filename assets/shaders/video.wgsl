@@ -25,11 +25,11 @@ fn convert_yuv_bt709(y: f32, u: f32, v: f32) -> vec3<f32> {
     let u_range = (u - 128.0/255.0) * (255.0/224.0);
     let v_range = (v - 128.0/255.0) * (255.0/224.0);
     
-    return vec3<f32>(
-        y_range + 1.5748 * v_range,
-        y_range - 0.1873 * u_range - 0.4681 * v_range,
-        y_range + 1.8556 * u_range
-    );
+    let r = y_range + 1.5748 * v_range;
+    let g = y_range - 0.1873 * u_range - 0.4681 * v_range;
+    let b = y_range + 1.8556 * u_range;
+    
+    return clamp(vec3<f32>(r, g, b), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 fn convert_yuv_bt601(y: f32, u: f32, v: f32) -> vec3<f32> {
@@ -37,11 +37,11 @@ fn convert_yuv_bt601(y: f32, u: f32, v: f32) -> vec3<f32> {
     let u_range = (u - 128.0/255.0) * (255.0/224.0);
     let v_range = (v - 128.0/255.0) * (255.0/224.0);
     
-    return vec3<f32>(
-        y_range + 1.402 * v_range,
-        y_range - 0.344 * u_range - 0.714 * v_range,
-        y_range + 1.772 * u_range
-    );
+    let r = y_range + 1.402 * v_range;
+    let g = y_range - 0.344 * u_range - 0.714 * v_range;
+    let b = y_range + 1.772 * u_range;
+    
+    return clamp(vec3<f32>(r, g, b), vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
 @vertex
@@ -63,9 +63,31 @@ fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    let y = textureSample(tex_y, s, in.uv).r;
-    let uv = textureSample(tex_uv, s, in.uv).rg;
+    // Texture size diagnostics
+    let y_tex_size = textureDimensions(tex_y);
+    let uv_tex_size = textureDimensions(tex_uv);
     
+    // Validate texture dimensions
+    if (y_tex_size.x == 0u || y_tex_size.y == 0u || 
+        uv_tex_size.x == 0u || uv_tex_size.y == 0u) {
+        return vec4<f32>(1.0, 0.0, 0.0, 1.0); // Red for invalid texture size
+    }
+
+    // Safe UV clamping
+    let safe_uv = clamp(in.uv, vec2<f32>(0.0), vec2<f32>(1.0));
+    
+    // Sample Y and UV planes
+    let y = textureSample(tex_y, s, safe_uv).r;
+    let uv = textureSample(tex_uv, s, safe_uv).rg;
+    
+    // Validate input values
+    if (y < 0.0 || y > 1.0 || 
+        uv.r < 0.0 || uv.r > 1.0 || 
+        uv.g < 0.0 || uv.g > 1.0) {
+        return vec4<f32>(0.0, 1.0, 0.0, 1.0); // Green for invalid input values
+    }
+    
+    // Convert YUV to RGB
     var rgb: vec3<f32>;
     switch uniforms.color_space {
         case 0u: { // BT.709
@@ -79,5 +101,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
     
-    return vec4<f32>(clamp(rgb, vec3(0.0), vec3(1.0)), 1.0);
+    // Create final color
+    let final_color = vec4<f32>(rgb, 1.0);
+    
+    // Validate output color
+    if (length(final_color.rgb) < 0.001) {
+        return vec4<f32>(0.0, 0.0, 1.0, 1.0); // Blue for zero-intensity conversion
+    }
+    
+    return final_color;
 }
