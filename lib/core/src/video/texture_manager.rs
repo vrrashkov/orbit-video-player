@@ -3,15 +3,26 @@ use iced_wgpu::wgpu;
 use std::{
     collections::{btree_map::Entry, BTreeMap, HashMap},
     num::NonZero,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 pub struct TextureManager {
-    pub intermediate_textures: Vec<wgpu::Texture>,
+    pub intermediate_textures: Vec<std::sync::Arc<wgpu::Texture>>,
     format: wgpu::TextureFormat,
 }
 
 impl TextureManager {
+    pub fn get_texture_view(&self, index: usize) -> Option<wgpu::TextureView> {
+        self.intermediate_textures
+            .get(index)
+            .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()))
+    }
+    pub fn get_texture(&self, index: usize) -> Option<std::sync::Arc<wgpu::Texture>> {
+        self.intermediate_textures.get(index).cloned()
+    }
     pub fn new(format: wgpu::TextureFormat) -> Self {
         println!("Creating TextureManager with format: {:?}", format);
         Self {
@@ -24,7 +35,7 @@ impl TextureManager {
         &self,
         device: &wgpu::Device,
         size: wgpu::Extent3d,
-    ) -> wgpu::Texture {
+    ) -> Arc<wgpu::Texture> {
         println!("Creating intermediate texture:");
         println!("  Size: {:?}", size);
         println!("  Format: {:?}", self.format);
@@ -42,12 +53,7 @@ impl TextureManager {
             view_formats: &[self.format],
         });
 
-        println!("Created intermediate texture:");
-        println!("  Format: {:?}", texture.format());
-        println!("  Size: {:?}", texture.size());
-        println!("  Usage: {:?}", texture.usage());
-
-        texture
+        Arc::new(texture)
     }
     pub fn create_texture_view(&self, index: usize) -> Option<wgpu::TextureView> {
         self.get_texture(index).map(|texture| {
@@ -89,7 +95,6 @@ impl TextureManager {
         size: wgpu::Extent3d,
         num_effects: usize,
     ) {
-        // Skip if we already have enough textures of the right size
         if self.intermediate_textures.len() > num_effects {
             let existing_size = self.intermediate_textures[0].size();
             if existing_size.width == size.width && existing_size.height == size.height {
@@ -97,17 +102,9 @@ impl TextureManager {
             }
         }
 
-        println!("\nResizing intermediate textures:");
-        println!("  Original requested size: {:?}", size);
-        println!("  Number of effects: {}", num_effects);
-        println!("  Format: {:?}", self.format);
-
-        // Clear existing textures
         self.intermediate_textures.clear();
 
-        // Create new textures
         for i in 0..=num_effects {
-            println!("\nCreating intermediate texture {}", i);
             let texture = self.create_intermediate_texture(device, size);
             self.intermediate_textures.push(texture);
         }
@@ -127,19 +124,19 @@ impl TextureManager {
         }
         valid
     }
-    pub fn get_texture(&self, index: usize) -> Option<&wgpu::Texture> {
-        let result = self.intermediate_textures.get(index);
-        println!("Accessing texture at index {}: {}", index, result.is_some());
-        if let Some(texture) = result {
-            println!("  Format: {:?}", texture.format());
-            println!("  Size: {:?}", texture.size());
-        }
-        result
-    }
+    // pub fn get_texture(&self, index: usize) -> Option<&wgpu::Texture> {
+    //     let result = self.intermediate_textures.get(index);
+    //     println!("Accessing texture at index {}: {}", index, result.is_some());
+    //     if let Some(texture) = result {
+    //         println!("  Format: {:?}", texture.format());
+    //         println!("  Size: {:?}", texture.size());
+    //     }
+    //     result
+    // }
 
-    pub fn textures_mut(&mut self) -> &mut Vec<wgpu::Texture> {
-        &mut self.intermediate_textures
-    }
+    // pub fn textures_mut(&mut self) -> &mut Vec<wgpu::Texture> {
+    //     &mut self.intermediate_textures
+    // }
 
     pub fn len(&self) -> usize {
         self.intermediate_textures.len()

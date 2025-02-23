@@ -299,6 +299,7 @@ impl ShaderEffectBuilder {
             format,
             uniforms,
             sampler,
+            current_bind_group: None,
         };
 
         println!(
@@ -323,6 +324,7 @@ pub struct ShaderEffect {
     pub uniforms: Option<ShaderUniforms>,
     pub sampler: wgpu::Sampler,
     pub format: wgpu::TextureFormat,
+    pub current_bind_group: Option<wgpu::BindGroup>,
 }
 
 impl ShaderEffect {
@@ -333,7 +335,13 @@ impl ShaderEffect {
     pub fn pipeline(&self) -> &wgpu::RenderPipeline {
         &self.pipeline
     }
+    pub fn update_bind_group(&mut self, bind_group: wgpu::BindGroup) {
+        self.current_bind_group = Some(bind_group);
+    }
 
+    pub fn get_bind_group(&self) -> Option<&wgpu::BindGroup> {
+        self.current_bind_group.as_ref()
+    }
     pub fn bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.bind_group_layout
     }

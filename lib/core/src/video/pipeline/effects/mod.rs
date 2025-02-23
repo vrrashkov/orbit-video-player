@@ -10,7 +10,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-use super::manager::VideoPipelineManager;
+use super::manager::{VideoEntry, VideoPipelineManager};
 
 pub mod upscale;
 pub mod yuv_to_rgb;
@@ -22,11 +22,17 @@ pub trait Effect: Send + Sync {
         &self,
         device: &wgpu::Device,
         effect: &ShaderEffect,
-        input_texture_view: Vec<&wgpu::TextureView>,
+        input_texture_view: Vec<wgpu::TextureView>,
         input_texture: Vec<&wgpu::Texture>,
     ) -> anyhow::Result<wgpu::BindGroup>;
     fn update_comparison(&mut self, comparison_enabled: bool, comparison_position: f32);
     fn clone_box(&self) -> Box<dyn Effect>;
+    fn update_for_frame(
+        &mut self,
+        device: &wgpu::Device,
+        effect: &mut ShaderEffect,
+        video: &VideoEntry,
+    ) -> anyhow::Result<()>;
 }
 
 pub struct EffectEntry {

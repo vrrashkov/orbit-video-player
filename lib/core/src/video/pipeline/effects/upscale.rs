@@ -1,6 +1,6 @@
 use super::Effect;
 use crate::video::{
-    pipeline::manager::VideoPipelineManager,
+    pipeline::manager::{VideoEntry, VideoPipelineManager},
     shader::{ShaderEffectBuilder, ShaderUniforms, UniformValue},
     ShaderEffect,
 };
@@ -138,11 +138,31 @@ impl Effect for UpscaleEffect {
             uniforms.update_buffer(queue);
         }
     }
+    fn update_for_frame(
+        &mut self,
+        device: &wgpu::Device,
+        effect: &mut ShaderEffect,
+        video: &VideoEntry,
+    ) -> anyhow::Result<()> {
+        let bind_group = self.create_bind_group(
+            device,
+            effect,
+            vec![
+                video.texture_y.create_view(&Default::default()),
+                video.texture_uv.create_view(&Default::default()),
+            ],
+            vec![&video.texture_y, &video.texture_uv],
+        )?;
+
+        // Update the shader effect's bind group
+        effect.update_bind_group(bind_group);
+        Ok(())
+    }
     fn create_bind_group(
         &self,
         device: &wgpu::Device,
         effect: &ShaderEffect,
-        input_texture_view_list: Vec<&wgpu::TextureView>,
+        input_texture_view_list: Vec<wgpu::TextureView>,
         input_texture_list: Vec<&wgpu::Texture>,
     ) -> anyhow::Result<wgpu::BindGroup> {
         let input_texture_view = if let Some(value) = input_texture_view_list.get(0) {

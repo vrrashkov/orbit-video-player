@@ -1,6 +1,6 @@
 use super::Effect;
 use crate::video::{
-    pipeline::manager::VideoPipelineManager,
+    pipeline::manager::{VideoEntry, VideoPipelineManager},
     shader::{ShaderEffectBuilder, ShaderUniforms, UniformValue},
     ShaderEffect,
 };
@@ -109,17 +109,36 @@ impl Effect for YuvToRgbEffect {
 
         shader_effect
     }
+    fn update_for_frame(
+        &mut self,
+        device: &wgpu::Device,
+        effect: &mut ShaderEffect, // Note: needs to be mutable now
+        video: &VideoEntry,
+    ) -> anyhow::Result<()> {
+        let bind_group = self.create_bind_group(
+            device,
+            effect,
+            vec![
+                video.texture_y.create_view(&Default::default()),
+                video.texture_uv.create_view(&Default::default()),
+            ],
+            vec![&video.texture_y, &video.texture_uv],
+        )?;
 
+        // Update the shader effect's bind group
+        effect.update_bind_group(bind_group);
+        Ok(())
+    }
     fn create_bind_group(
         &self,
         device: &wgpu::Device,
         effect: &ShaderEffect,
-        input_texture_view_list: Vec<&wgpu::TextureView>,
+        input_texture_view_list: Vec<wgpu::TextureView>,
         input_texture_list: Vec<&wgpu::Texture>,
     ) -> anyhow::Result<wgpu::BindGroup> {
         effect.debug_layout();
-        let y_texture_view = input_texture_view_list[0];
-        let uv_texture_view = input_texture_view_list[1];
+        let y_texture_view = &input_texture_view_list[0];
+        let uv_texture_view = &input_texture_view_list[1];
 
         println!(
             "Creating bind group with effect layout ID: {:?}",
@@ -132,11 +151,11 @@ impl Effect for YuvToRgbEffect {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(y_texture_view),
+                    resource: wgpu::BindingResource::TextureView(&y_texture_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(uv_texture_view),
+                    resource: wgpu::BindingResource::TextureView(&uv_texture_view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,

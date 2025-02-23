@@ -120,12 +120,7 @@ impl Primitive for VideoPrimitive {
             println!("Effect created successfully");
 
             pipeline_manager
-                .add_effect(
-                    device,
-                    queue,
-                    upscale_shader_effect,
-                    Box::new(upscale_effect),
-                )
+                .add_effect(device, queue, upscale_shader_effect)
                 .unwrap();
             ///// END EFFECTS
             pipeline_manager.effects_added = true;
