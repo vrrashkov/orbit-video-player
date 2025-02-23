@@ -102,29 +102,32 @@ impl Primitive for VideoPrimitive {
         }
 
         // Check if effects have already been added
-        if !pipeline_manager.effects_added {
-            // ADD EFFECTS AFTER FRAME
-            println!("Creating upscale effect");
-            let mut upscale_effect = UpscaleEffect {
-                state: UpscaleEffectState {
-                    comparison_enabled: self.comparison_enabled,
-                    comparison_position: self.comparison_position,
-                    color_threshold: 1.,
-                    color_blend_mode: 0.5,
-                },
-                format,
-            };
+        // if !pipeline_manager.effects_added {
+        let mut upscale_effect = UpscaleEffect {
+            state: UpscaleEffectState {
+                comparison_enabled: self.comparison_enabled,
+                comparison_position: self.comparison_position,
+                color_threshold: 1.,
+                color_blend_mode: 0.5,
+            },
+            format,
+        };
 
-            println!("Adding shader effect");
-            let upscale_shader_effect = upscale_effect.add(device, queue);
-            println!("Effect created successfully");
+        let mut upscale_shader_effect = upscale_effect.add(device, queue);
+        println!("Effect created successfully");
 
-            pipeline_manager
-                .add_effect(device, queue, upscale_shader_effect)
-                .unwrap();
-            ///// END EFFECTS
-            pipeline_manager.effects_added = true;
-        }
+        pipeline_manager
+            .add_effect(
+                pipeline_manager.effects_added,
+                device,
+                queue,
+                &mut upscale_shader_effect,
+                Box::new(upscale_effect),
+            )
+            .unwrap();
+
+        pipeline_manager.effects_added = true;
+        // }
 
         let physical_size = viewport.physical_size();
         // Resize textures to match viewport

@@ -4,7 +4,7 @@ use crate::video::{
     shader::{ShaderEffectBuilder, ShaderUniforms, UniformValue},
     ShaderEffect,
 };
-use iced_wgpu::wgpu;
+use iced_wgpu::wgpu::{self, Texture, TextureView};
 use std::{fs, num::NonZero};
 
 #[derive(Clone, Debug)]
@@ -109,21 +109,35 @@ impl Effect for YuvToRgbEffect {
 
         shader_effect
     }
+    // fn update_for_frame(
+    //     &mut self,
+    //     device: &wgpu::Device,
+    //     effect: &mut ShaderEffect,
+    //     video: &VideoEntry,
+    // ) -> anyhow::Result<()> {
+    //     let bind_group = self.create_bind_group(
+    //         device,
+    //         effect,
+    //         vec![
+    //             video.texture_y.create_view(&Default::default()),
+    //             video.texture_uv.create_view(&Default::default()),
+    //         ],
+    //         vec![&video.texture_y, &video.texture_uv],
+    //     )?;
+
+    //     // Update the shader effect's bind group
+    //     effect.update_bind_group(bind_group);
+    //     Ok(())
+    // }
     fn update_for_frame(
         &mut self,
         device: &wgpu::Device,
-        effect: &mut ShaderEffect, // Note: needs to be mutable now
-        video: &VideoEntry,
+        effect: &mut ShaderEffect,
+        texture_view_list: &[TextureView],
+        texture_list: &[&Texture],
     ) -> anyhow::Result<()> {
-        let bind_group = self.create_bind_group(
-            device,
-            effect,
-            vec![
-                video.texture_y.create_view(&Default::default()),
-                video.texture_uv.create_view(&Default::default()),
-            ],
-            vec![&video.texture_y, &video.texture_uv],
-        )?;
+        println!("update_for_frame YUV");
+        let bind_group = self.create_bind_group(device, effect, texture_view_list, texture_list)?;
 
         // Update the shader effect's bind group
         effect.update_bind_group(bind_group);
@@ -133,12 +147,12 @@ impl Effect for YuvToRgbEffect {
         &self,
         device: &wgpu::Device,
         effect: &ShaderEffect,
-        input_texture_view_list: Vec<wgpu::TextureView>,
-        input_texture_list: Vec<&wgpu::Texture>,
+        texture_view_list: &[iced_wgpu::wgpu::TextureView],
+        texture_list: &[&iced_wgpu::wgpu::Texture],
     ) -> anyhow::Result<wgpu::BindGroup> {
         effect.debug_layout();
-        let y_texture_view = &input_texture_view_list[0];
-        let uv_texture_view = &input_texture_view_list[1];
+        let y_texture_view = &texture_view_list[0];
+        let uv_texture_view = &texture_view_list[1];
 
         println!(
             "Creating bind group with effect layout ID: {:?}",

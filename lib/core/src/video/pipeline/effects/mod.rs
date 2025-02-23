@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::video::{shader::ShaderUniforms, ShaderEffect};
 
-use iced_wgpu::primitive::Primitive;
-use iced_wgpu::wgpu;
+use iced_wgpu::wgpu::{self, Texture};
+use iced_wgpu::{primitive::Primitive, wgpu::TextureView};
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     num::NonZero,
@@ -22,24 +22,32 @@ pub trait Effect: Send + Sync {
         &self,
         device: &wgpu::Device,
         effect: &ShaderEffect,
-        input_texture_view: Vec<wgpu::TextureView>,
-        input_texture: Vec<&wgpu::Texture>,
+        texture_view_list: &[TextureView],
+        texture_list: &[&Texture],
     ) -> anyhow::Result<wgpu::BindGroup>;
     fn update_comparison(&mut self, comparison_enabled: bool, comparison_position: f32);
     fn clone_box(&self) -> Box<dyn Effect>;
+    // fn update_for_frame(
+    //     &mut self,
+    //     device: &wgpu::Device,
+    //     effect: &mut ShaderEffect,
+    //     video: &VideoEntry,
+    // ) -> anyhow::Result<()>;
     fn update_for_frame(
         &mut self,
         device: &wgpu::Device,
         effect: &mut ShaderEffect,
-        video: &VideoEntry,
+        texture_view_list: &[TextureView],
+        texture_list: &[&Texture],
     ) -> anyhow::Result<()>;
 }
 
 pub struct EffectEntry {
     pub effect: ShaderEffect,
     pub state: Box<dyn Effect>,
-    pub bind_group: Option<wgpu::BindGroup>,
-    pub layout_id: Option<wgpu::Id<wgpu::BindGroupLayout>>,
+    pub get_from_video: bool,
+    // pub bind_group: Option<wgpu::BindGroup>,
+    // pub layout_id: Option<wgpu::Id<wgpu::BindGroupLayout>>,
 }
 
 pub struct EffectManager {
@@ -61,45 +69,61 @@ impl EffectManager {
         let entry = EffectEntry {
             effect,
             state,
-            bind_group: None,
-            layout_id: None,
+            get_from_video: false,
         };
         self.effects.push(entry);
-    }
 
-    pub fn add_bind_group(
-        &mut self,
-        bind_group: wgpu::BindGroup,
-        layout_id: wgpu::Id<wgpu::BindGroupLayout>,
-    ) {
-        if let Some(entry) = self.effects.last_mut() {
-            let effect_layout_id = entry.effect.bind_group_layout.global_id();
-            println!("Adding bind group for effect '{}':", entry.effect.name);
+        // Print all effects after adding new one
+        println!("\nCurrent Effect Chain:");
+        for (i, effect_entry) in self.effects.iter().enumerate() {
             println!(
-                "  Effect/Layout ID (should match): {:?} == {:?}",
-                effect_layout_id, layout_id
-            );
-            println!(
-                "  Bind group ID (different by design): {:?}",
-                bind_group.global_id()
+                "{}. Effect '{}' (Layout ID: {:?})",
+                i + 1,
+                effect_entry.effect.name,
+                effect_entry.effect.bind_group_layout.global_id()
             );
 
-            // Only assert that layouts match
-            assert_eq!(
-                effect_layout_id, layout_id,
-                "Layout ID mismatch when adding bind group"
-            );
-
-            entry.bind_group = Some(bind_group);
-            entry.layout_id = Some(layout_id);
+            // Print bind group info if available
+            if let Some(bind_group) = effect_entry.effect.get_bind_group() {
+                println!("   Bind Group ID: {:?}", bind_group.global_id());
+            }
         }
+        println!("Total effects: {}\n", self.effects.len());
     }
+
+    // pub fn add_bind_group(
+    //     &mut self,
+    //     bind_group: wgpu::BindGroup,
+    //     layout_id: wgpu::Id<wgpu::BindGroupLayout>,
+    // ) {
+    //     if let Some(entry) = self.effects.last_mut() {
+    //         let effect_layout_id = entry.effect.bind_group_layout.global_id();
+    //         println!("Adding bind group for effect '{}':", entry.effect.name);
+    //         println!(
+    //             "  Effect/Layout ID (should match): {:?} == {:?}",
+    //             effect_layout_id, layout_id
+    //         );
+    //         println!(
+    //             "  Bind group ID (different by design): {:?}",
+    //             bind_group.global_id()
+    //         );
+
+    //         // Only assert that layouts match
+    //         assert_eq!(
+    //             effect_layout_id, layout_id,
+    //             "Layout ID mismatch when adding bind group"
+    //         );
+
+    //         entry.bind_group = Some(bind_group);
+    //         entry.layout_id = Some(layout_id);
+    //     }
+    // }
 
     pub fn bind_groups(&self) -> Vec<&wgpu::BindGroup> {
         let groups = self
             .effects
             .iter()
-            .filter_map(|e| e.bind_group.as_ref())
+            .filter_map(|e| e.effect.get_bind_group())
             .collect::<Vec<_>>();
 
         println!("Returning bind groups:");

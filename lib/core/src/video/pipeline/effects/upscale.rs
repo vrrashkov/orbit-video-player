@@ -4,7 +4,7 @@ use crate::video::{
     shader::{ShaderEffectBuilder, ShaderUniforms, UniformValue},
     ShaderEffect,
 };
-use iced_wgpu::wgpu;
+use iced_wgpu::wgpu::{self, Texture, TextureView};
 use std::{fs, num::NonZero};
 
 #[derive(Clone, Debug)]
@@ -104,7 +104,7 @@ impl Effect for UpscaleEffect {
         println!("Created bind group layout");
 
         println!("  Current format SHADER: {:?}", self.format);
-        let shader_effect = ShaderEffectBuilder::new("effect")
+        let shader_effect = ShaderEffectBuilder::new("upscale")
             .with_shader_source(shader_source.into())
             .with_bind_group_layout(bind_group_layout)
             .with_uniforms(shader_uniforms)
@@ -138,21 +138,35 @@ impl Effect for UpscaleEffect {
             uniforms.update_buffer(queue);
         }
     }
+    // fn update_for_frame(
+    //     &mut self,
+    //     device: &wgpu::Device,
+    //     effect: &mut ShaderEffect,
+    //     video: &VideoEntry,
+    // ) -> anyhow::Result<()> {
+    //     let bind_group = self.create_bind_group(
+    //         device,
+    //         effect,
+    //         vec![
+    //             video.texture_y.create_view(&Default::default()),
+    //             video.texture_uv.create_view(&Default::default()),
+    //         ],
+    //         vec![&video.texture_y, &video.texture_uv],
+    //     )?;
+
+    //     // Update the shader effect's bind group
+    //     effect.update_bind_group(bind_group);
+    //     Ok(())
+    // }
     fn update_for_frame(
         &mut self,
         device: &wgpu::Device,
         effect: &mut ShaderEffect,
-        video: &VideoEntry,
+        texture_view_list: &[TextureView],
+        texture_list: &[&Texture],
     ) -> anyhow::Result<()> {
-        let bind_group = self.create_bind_group(
-            device,
-            effect,
-            vec![
-                video.texture_y.create_view(&Default::default()),
-                video.texture_uv.create_view(&Default::default()),
-            ],
-            vec![&video.texture_y, &video.texture_uv],
-        )?;
+        println!("update_for_frame UPSCALE");
+        let bind_group = self.create_bind_group(device, effect, texture_view_list, texture_list)?;
 
         // Update the shader effect's bind group
         effect.update_bind_group(bind_group);
@@ -162,19 +176,19 @@ impl Effect for UpscaleEffect {
         &self,
         device: &wgpu::Device,
         effect: &ShaderEffect,
-        input_texture_view_list: Vec<wgpu::TextureView>,
-        input_texture_list: Vec<&wgpu::Texture>,
+        texture_view_list: &[iced_wgpu::wgpu::TextureView],
+        texture_list: &[&iced_wgpu::wgpu::Texture],
     ) -> anyhow::Result<wgpu::BindGroup> {
-        let input_texture_view = if let Some(value) = input_texture_view_list.get(0) {
+        let input_texture_view = if let Some(value) = texture_view_list.get(0) {
             value
         } else {
-            return Err(anyhow::anyhow!("Pleaase provide input_texture_view"));
+            return Err(anyhow::anyhow!("Pleaase provide texture_view_list"));
         };
 
-        let input_texture = if let Some(value) = input_texture_list.get(0) {
+        let input_texture = if let Some(value) = texture_list.get(0) {
             value
         } else {
-            return Err(anyhow::anyhow!("Pleaase provide input_texture"));
+            return Err(anyhow::anyhow!("Pleaase provide texture_list"));
         };
         println!("Creating Upscale bind group with layout:");
         println!("  Expected bindings: [Texture, Sampler, Uniform]");

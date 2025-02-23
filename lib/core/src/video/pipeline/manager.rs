@@ -250,31 +250,48 @@ impl VideoPipelineManager {
             &self.state,
         );
 
-        if let Some(video) = self.videos.get(&video_id) {
-            for effect_entry in &mut self.effect_manager.effects {
-                effect_entry.state.prepare(&mut effect_entry.effect, queue);
-                if let Err(e) =
-                    effect_entry
-                        .state
-                        .update_for_frame(device, &mut effect_entry.effect, video)
-                {
-                    println!("Failed to update effect bind group: {:?}", e);
-                }
-                if let Some(uniforms) = &effect_entry.effect.uniforms {
-                    let comparison_position =
-                        uniforms.get_float("comparison_position").unwrap_or(0.5);
-                    let comparison_enabled = uniforms
-                        .get_uint("comparison_enabled")
-                        .map(|v| v != 0)
-                        .unwrap_or(false);
+        for effect_entry in &mut self.effect_manager.effects {
+            effect_entry.state.prepare(&mut effect_entry.effect, queue);
 
-                    if comparison_enabled {
-                        self.line_pipeline
-                            .prepare(queue, bounds, comparison_position);
-                    }
+            if let Some(uniforms) = &effect_entry.effect.uniforms {
+                let comparison_position = uniforms.get_float("comparison_position").unwrap_or(0.5);
+                let comparison_enabled = uniforms
+                    .get_uint("comparison_enabled")
+                    .map(|v| v != 0)
+                    .unwrap_or(false);
+
+                if comparison_enabled {
+                    self.line_pipeline
+                        .prepare(queue, bounds, comparison_position);
                 }
             }
         }
+
+        // if let Some(video) = self.videos.get(&video_id) {
+        //     for effect_entry in &mut self.effect_manager.effects {
+        //         effect_entry.state.prepare(&mut effect_entry.effect, queue);
+        //         if let Err(e) =
+        //             effect_entry
+        //                 .state
+        //                 .update_for_frame(device, &mut effect_entry.effect, video)
+        //         {
+        //             println!("Failed to update effect bind group: {:?}", e);
+        //         }
+        //         if let Some(uniforms) = &effect_entry.effect.uniforms {
+        //             let comparison_position =
+        //                 uniforms.get_float("comparison_position").unwrap_or(0.5);
+        //             let comparison_enabled = uniforms
+        //                 .get_uint("comparison_enabled")
+        //                 .map(|v| v != 0)
+        //                 .unwrap_or(false);
+
+        //             if comparison_enabled {
+        //                 self.line_pipeline
+        //                     .prepare(queue, bounds, comparison_position);
+        //             }
+        //         }
+        //     }
+        // }
     }
 
     pub fn draw(
@@ -320,141 +337,143 @@ impl VideoPipelineManager {
                 self.texture_manager.len()
             );
             // First pass: YUV to RGB conversion
-            if let Some(input_texture) = self.texture_manager.get_texture(0) {
-                println!("Intermediate texture: {:?}", input_texture.format());
-                println!("First pass format info:");
-                println!("  Input Y format: {:?}", video.texture_y.format());
-                println!("  Input UV format: {:?}", video.texture_uv.format());
+            // if let Some(input_texture) = self.texture_manager.get_texture(0) {
+            // println!("Intermediate texture: {:?}", input_texture.format());
+            // println!("First pass format info:");
+            // println!("  Input Y format: {:?}", video.texture_y.format());
+            // println!("  Input UV format: {:?}", video.texture_uv.format());
+            // println!(
+            //     "  Intermediate texture format: {:?}",
+            //     input_texture.format()
+            // );
+
+            // if let Some(first_view) = self.texture_manager.create_texture_view(0) {
+            // Draw YUV video to first intermediate texture
+            // self.video_pipeline
+            //     .draw_clear(&first_view, encoder, clip, video);
+
+            // Create all texture views upfront
+            let mut views = Vec::new();
+            for i in 0..self.effect_manager.len() {
+                println!("Processing effect {}:", i);
                 println!(
-                    "  Intermediate texture format: {:?}",
-                    input_texture.format()
+                    "  Effect name: {}",
+                    self.effect_manager.effects[i].effect.name
                 );
+                println!(
+                    "  Layout ID: {:?}",
+                    self.effect_manager.effects[i]
+                        .effect
+                        .bind_group_layout
+                        .global_id()
+                );
+                println!("  Using bind group index: {}", i);
+                if let Some(texture) = self.texture_manager.get_texture(i) {
+                    println!("Creating view for texture {}:", i);
+                    println!("  Texture format: {:?}", texture.format());
 
-                if let Some(first_view) = self.texture_manager.create_texture_view(0) {
-                    // Draw YUV video to first intermediate texture
-                    self.video_pipeline
-                        .draw_clear(&first_view, encoder, clip, video);
-
-                    // Create all texture views upfront
-                    let mut views = Vec::new();
-                    for i in 0..self.effect_manager.len() {
-                        println!("Processing effect {}:", i);
-                        println!(
-                            "  Effect name: {}",
-                            self.effect_manager.effects[i].effect.name
-                        );
-                        println!(
-                            "  Layout ID: {:?}",
-                            self.effect_manager.effects[i]
-                                .effect
-                                .bind_group_layout
-                                .global_id()
-                        );
-                        println!("  Using bind group index: {}", i);
-                        if let Some(texture) = self.texture_manager.get_texture(i) {
-                            println!("Creating view for texture {}:", i);
-                            println!("  Texture format: {:?}", texture.format());
-
-                            if let Some(view) = self.texture_manager.create_texture_view(i) {
-                                views.push(view);
-                            } else {
-                                println!("Failed to create view for texture {}", i);
-                                return;
-                            }
-                        } else {
-                            println!("Failed to get texture {}", i);
-                            return;
-                        }
-                    }
-
-                    // Calculate the render target and texture dimensions
-                    let render_target_width = clip.width as f32;
-                    let render_target_height = clip.height as f32;
-
-                    let texture_width = video.texture_y.size().width as f32;
-                    let texture_height = video.texture_y.size().height as f32;
-
-                    // Process effects chain
-                    for i in 0..self.effect_manager.len() {
-                        if let Some(input_tex) = self.texture_manager.get_texture(i) {
-                            println!("Processing effect {}:", i);
-                            println!(
-                                "  Effect name: {}",
-                                self.effect_manager.effects[i].effect.name
-                            );
-                            println!(
-                                "  Effect layout ID: {:?}",
-                                self.effect_manager.effects[i]
-                                    .effect
-                                    .bind_group_layout
-                                    .global_id()
-                            );
-                            println!(
-                                "  Bind group ID: {:?}",
-                                self.effect_manager.bind_groups()[i].global_id()
-                            );
-
-                            let output_view = if i == self.effect_manager.len() - 1 {
-                                target
-                            } else {
-                                &views[i + 1]
-                            };
-
-                            // Ensure bind group matches the effect
-                            if self.effect_manager.effects[i].effect.name == "yuv_to_rgb" {
-                                println!("  Verifying YUV to RGB bindings");
-                            } else if self.effect_manager.effects[i].effect.name == "effect" {
-                                println!("  Verifying Upscale bindings");
-                            }
-                            let bind_group = self.effect_manager.effects[i]
-                                .effect
-                                .get_bind_group()
-                                .expect("Bind group should be updated in prepare");
-                            self.apply_effect(
-                                encoder,
-                                &self.effect_manager.effects[i].effect,
-                                bind_group, // Make sure this matches
-                                output_view,
-                                input_tex.as_ref(),
-                                clip,
-                                i < self.effect_manager.len() - 1,
-                                render_target_width,
-                                render_target_height,
-                                texture_width,
-                                texture_height,
-                            );
-                        }
-                        println!("Effect {} complete", i);
-                    }
-
-                    // Handle comparison line
-                    let mut draw_comparison_line = false;
-                    if let Some(effect_entry) = self.effect_manager.effects.last() {
-                        if let Some(uniforms) = &effect_entry.effect.uniforms {
-                            let comparison_enabled = uniforms
-                                .get_uint("comparison_enabled")
-                                .map(|v| v != 0)
-                                .unwrap_or(false);
-
-                            if comparison_enabled {
-                                println!("Will draw comparison line");
-                                draw_comparison_line = true;
-                            }
-                        }
-                    }
-
-                    if draw_comparison_line {
-                        println!("Drawing comparison line");
-                        self.line_pipeline.draw(encoder, target, clip);
+                    if let Some(view) = self.texture_manager.create_texture_view(i) {
+                        views.push(view);
+                    } else {
+                        println!("Failed to create view for texture {}", i);
+                        return;
                     }
                 } else {
-                    println!("Failed to create first view");
-                    self.video_pipeline.draw(target, encoder, clip, video);
+                    println!("Failed to get texture {}", i);
+                    return;
                 }
-            } else {
-                println!("Failed to get first intermediate texture");
-                self.video_pipeline.draw(target, encoder, clip, video);
             }
+
+            // Calculate the render target and texture dimensions
+            let render_target_width = clip.width as f32;
+            let render_target_height = clip.height as f32;
+
+            let texture_width = video.texture_y.size().width as f32;
+            let texture_height = video.texture_y.size().height as f32;
+
+            // Process effects chain
+            for i in 0..self.effect_manager.len() {
+                if let Some(input_tex) = self.texture_manager.get_texture(i) {
+                    println!("Processing effect {}:", i);
+                    println!(
+                        "  Effect name: {}",
+                        self.effect_manager.effects[i].effect.name
+                    );
+                    println!(
+                        "  Effect layout ID: {:?}",
+                        self.effect_manager.effects[i]
+                            .effect
+                            .bind_group_layout
+                            .global_id()
+                    );
+                    println!(
+                        "  Bind group ID: {:?}",
+                        self.effect_manager.bind_groups()[i].global_id()
+                    );
+
+                    let output_view = if i == self.effect_manager.len() - 1 {
+                        target
+                    } else {
+                        &views[i + 1]
+                    };
+
+                    // Ensure bind group matches the effect
+                    if self.effect_manager.effects[i].effect.name == "yuv_to_rgb" {
+                        println!("  Verifying YUV to RGB bindings");
+                    } else if self.effect_manager.effects[i].effect.name == "effect" {
+                        println!("  Verifying Upscale bindings");
+                    }
+
+                    let bind_group = self.effect_manager.effects[i]
+                        .effect
+                        .get_bind_group()
+                        .expect("Bind group should be updated in prepare");
+
+                    self.apply_effect(
+                        encoder,
+                        &self.effect_manager.effects[i].effect,
+                        bind_group, // Make sure this matches
+                        output_view,
+                        input_tex.as_ref(),
+                        clip,
+                        i < self.effect_manager.len() - 1,
+                        render_target_width,
+                        render_target_height,
+                        texture_width,
+                        texture_height,
+                    );
+                }
+                println!("Effect {} complete", i);
+            }
+
+            // Handle comparison line
+            let mut draw_comparison_line = false;
+            if let Some(effect_entry) = self.effect_manager.effects.last() {
+                if let Some(uniforms) = &effect_entry.effect.uniforms {
+                    let comparison_enabled = uniforms
+                        .get_uint("comparison_enabled")
+                        .map(|v| v != 0)
+                        .unwrap_or(false);
+
+                    if comparison_enabled {
+                        println!("Will draw comparison line");
+                        draw_comparison_line = true;
+                    }
+                }
+            }
+
+            if draw_comparison_line {
+                println!("Drawing comparison line");
+                self.line_pipeline.draw(encoder, target, clip);
+            }
+            // } else {
+            //     println!("Failed to create first view");
+            //     self.video_pipeline.draw(target, encoder, clip, video);
+            // }
+            // } else {
+            //     println!("Failed to get first intermediate texture");
+            //     self.video_pipeline.draw(target, encoder, clip, video);
+            // }
         } else {
             println!("Video not found with ID: {}", video_id);
         }
@@ -573,27 +592,52 @@ impl VideoPipelineManager {
 
     pub fn add_effect(
         &mut self,
+        update: bool,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        shader_effect: ShaderEffect,
+        shader_effect: &mut ShaderEffect,
+        mut shader_effect_type: Box<dyn Effect + Send + Sync>,
     ) -> anyhow::Result<()> {
         println!("Effect Addition Diagnostics:");
-        println!(
-            "Adding effect with layout ID: {:?}",
-            shader_effect.bind_group_layout.global_id()
-        );
 
-        if self.effect_manager.len() == 0 {
-            self.handle_first_video(device, queue, shader_effect)
-        } else {
-            self.handle_subsequent_effect(device, queue, shader_effect)
+        let effect_count = self.effect_manager.effects.len();
+
+        println!("effect_count {}", effect_count);
+        // Process each index
+        for i in 0..=effect_count {
+            println!("indexxxxxxx {}", i);
+            if i == 0 {
+                self.handle_first_video(
+                    update,
+                    i,
+                    device,
+                    queue,
+                    shader_effect,
+                    &mut shader_effect_type,
+                )?;
+            } else {
+                println!("testtttttt 2222222");
+                self.handle_subsequent_effect(
+                    update,
+                    i,
+                    device,
+                    queue,
+                    shader_effect,
+                    &mut shader_effect_type,
+                )?;
+            }
         }
+
+        Ok(())
     }
     fn handle_first_video(
         &mut self,
+        update: bool,
+        index: usize,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        shader_effect: ShaderEffect,
+        shader_effect: &mut ShaderEffect,
+        _shader_effect_type: &mut Box<dyn Effect + Send + Sync>,
     ) -> anyhow::Result<()> {
         let (size, views, format) = {
             let video = self
@@ -616,39 +660,66 @@ impl VideoPipelineManager {
             (size, vec![y_view, uv_view], format)
         };
 
-        self.process_effect(device, queue, shader_effect, views, format, size)
-    }
-
-    fn handle_subsequent_effect(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        shader_effect: ShaderEffect,
-    ) -> anyhow::Result<()> {
-        let effect_count = self.effect_manager.len();
-        let last_texture = self
-            .texture_manager
-            .get_texture(effect_count - 1)
-            .ok_or_else(|| anyhow::anyhow!("No texture available"))?;
-
-        let last_texture_view = self
-            .texture_manager
-            .get_texture_view(effect_count - 1)
-            .ok_or_else(|| anyhow::anyhow!("No texture available"))?;
-
-        let texture_size = wgpu::Extent3d {
-            width: last_texture.size().width,
-            height: last_texture.size().height,
-            depth_or_array_layers: 1,
-        };
-
-        let format = last_texture.format();
-
+        println!("testtttttt");
         self.process_effect(
+            update,
+            index,
             device,
             queue,
             shader_effect,
-            vec![last_texture_view],
+            &views,
+            format,
+            size,
+        )
+    }
+    fn handle_subsequent_effect(
+        &mut self,
+        update: bool,
+        index: usize,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        shader_effect: &mut ShaderEffect,
+        shader_effect_type: &mut Box<dyn Effect + Send + Sync>,
+    ) -> anyhow::Result<()> {
+        // Get input texture from previous effect
+        let input_texture = self
+            .texture_manager
+            .get_texture(index - 1) // Use previous index for input
+            .ok_or_else(|| anyhow::anyhow!("No input texture available"))?;
+
+        let input_view = self
+            .texture_manager
+            .get_texture_view(index - 1) // Use previous index for input
+            .ok_or_else(|| anyhow::anyhow!("No input texture view available"))?;
+
+        // Get output texture for current effect
+        let output_texture = self
+            .texture_manager
+            .get_texture(index) // Current index for output
+            .ok_or_else(|| anyhow::anyhow!("No output texture available"))?;
+
+        // Create texture lists for update_for_frame
+        let texture_views = vec![input_view];
+        let textures = vec![input_texture.as_ref()];
+
+        // Update the effect's bind group
+        println!("update_for_frame shader_effect name {}", shader_effect.name);
+        shader_effect_type.update_for_frame(device, shader_effect, &texture_views, &textures)?;
+
+        let format = output_texture.format();
+        let texture_size = wgpu::Extent3d {
+            width: output_texture.size().width,
+            height: output_texture.size().height,
+            depth_or_array_layers: 1,
+        };
+
+        self.process_effect(
+            update,
+            index,
+            device,
+            queue,
+            shader_effect,
+            &texture_views,
             format,
             texture_size,
         )
@@ -656,15 +727,16 @@ impl VideoPipelineManager {
 
     fn process_effect(
         &mut self,
+        update: bool,
+        index: usize,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        shader_effect: ShaderEffect,
-        previous_texture_views: Vec<TextureView>,
+        shader_effect: &mut ShaderEffect,
+        previous_texture_views: &[TextureView],
         previous_format: TextureFormat,
         texture_size: wgpu::Extent3d,
     ) -> anyhow::Result<()> {
         let effect_count = self.effect_manager.len();
-
         let required_format = shader_effect.get_format().to_owned();
 
         if previous_format != required_format {
@@ -672,36 +744,38 @@ impl VideoPipelineManager {
                 (wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb) => {
                     let mut yuv_to_rgb_effect =
                         YuvToRgbEffect::new(0, wgpu::TextureFormat::Bgra8UnormSrgb);
-                    let yuv_shader = yuv_to_rgb_effect.add(device, queue);
+                    let mut yuv_shader = yuv_to_rgb_effect.add(device, queue);
                     let yuv_layout = &yuv_shader.bind_group_layout;
 
-                    self.texture_manager.resize_intermediate_textures(
-                        device,
-                        texture_size,
-                        effect_count + 1,
-                    );
+                    self.texture_manager
+                        .resize_intermediate_textures(device, texture_size, index);
 
                     let output_texture = self
                         .texture_manager
-                        .get_texture(self.effect_manager.len())
+                        .get_texture(index)
                         .ok_or_else(|| anyhow::anyhow!("Failed to get output texture"))?;
 
                     let yuv_bind_group = yuv_to_rgb_effect.create_bind_group(
                         device,
                         &yuv_shader,
                         previous_texture_views,
-                        vec![output_texture.as_ref()],
+                        &vec![output_texture.as_ref()],
                     )?;
 
                     println!("Adding YUV to RGB conversion effect");
                     println!("  Layout ID: {:?}", yuv_layout.global_id());
 
-                    let layout_id = yuv_shader.bind_group_layout.global_id();
+                    // let layout_id = yuv_shader.bind_group_layout.global_id();
+                    yuv_shader.update_bind_group(yuv_bind_group);
 
-                    self.effect_manager
-                        .add_effect(yuv_shader, Box::new(yuv_to_rgb_effect));
-                    self.effect_manager
-                        .add_bind_group(yuv_bind_group, layout_id);
+                    println!("updateupdate {}", update);
+                    if !update {
+                        println!("Adding YUV to RGB conversion effect CREATE");
+                        self.effect_manager
+                            .add_effect(yuv_shader, Box::new(yuv_to_rgb_effect));
+                    }
+                    // self.effect_manager
+                    //     .add_bind_group(yuv_bind_group, layout_id);
                 }
                 _ => {
                     return Err(anyhow::anyhow!(
@@ -730,6 +804,7 @@ impl VideoPipelineManager {
 
         Ok(())
     }
+
     // pub fn add_effect(
     //     &mut self,
     //     device: &wgpu::Device,
