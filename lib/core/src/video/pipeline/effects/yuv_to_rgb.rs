@@ -109,26 +109,7 @@ impl Effect for YuvToRgbEffect {
 
         shader_effect
     }
-    // fn update_for_frame(
-    //     &mut self,
-    //     device: &wgpu::Device,
-    //     effect: &mut ShaderEffect,
-    //     video: &VideoEntry,
-    // ) -> anyhow::Result<()> {
-    //     let bind_group = self.create_bind_group(
-    //         device,
-    //         effect,
-    //         vec![
-    //             video.texture_y.create_view(&Default::default()),
-    //             video.texture_uv.create_view(&Default::default()),
-    //         ],
-    //         vec![&video.texture_y, &video.texture_uv],
-    //     )?;
-
-    //     // Update the shader effect's bind group
-    //     effect.update_bind_group(bind_group);
-    //     Ok(())
-    // }
+    // In the update_for_frame method of YuvToRgbEffect
     fn update_for_frame(
         &mut self,
         device: &wgpu::Device,
@@ -136,11 +117,18 @@ impl Effect for YuvToRgbEffect {
         texture_view_list: &[TextureView],
         texture_list: &[&Texture],
     ) -> anyhow::Result<()> {
-        println!("update_for_frame YUV");
+        // Check if we have enough views
+        if texture_view_list.len() < 2 {
+            return Err(anyhow::anyhow!("Not enough texture views"));
+        }
+
+        // Create a completely new bind group with the current frame's textures
         let bind_group = self.create_bind_group(device, effect, texture_view_list, texture_list)?;
 
-        // Update the shader effect's bind group
+        // Replace the old bind group entirely, don't try to update it
         effect.update_bind_group(bind_group);
+        println!("YUV to RGB effect bind group completely replaced");
+
         Ok(())
     }
     fn create_bind_group(
@@ -151,6 +139,69 @@ impl Effect for YuvToRgbEffect {
         texture_list: &[&iced_wgpu::wgpu::Texture],
     ) -> anyhow::Result<wgpu::BindGroup> {
         effect.debug_layout();
+
+        // Check if we have the expected number of textures
+        if texture_view_list.len() < 2 {
+            println!(
+                "WARNING: YUV to RGB effect received only {} texture views",
+                texture_view_list.len()
+            );
+            println!("This might cause a pink screen if not handled properly");
+
+            // Check formats to see what we're dealing with
+            if texture_list.len() > 0 {
+                println!("Input texture format: {:?}", texture_list[0].format());
+
+                // If input format is already RGB/BGRA, we might need to pass through directly
+                if texture_list[0].format() == wgpu::TextureFormat::Bgra8UnormSrgb {
+                    println!("Input is already in BGRA format - attempting to create compatible bind group");
+
+                    // Create a dummy texture for the second binding to make shader happy
+                    // Or use the same texture for both bindings
+                    let y_texture_view = &texture_view_list[0];
+
+                    // Special case: create bind group that should handle RGB input
+                    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("rgb_input_bind_group"),
+                        layout: &effect.bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(y_texture_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(y_texture_view), // Use same texture for UV
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Sampler(&effect.sampler),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: effect
+                                    .uniforms
+                                    .as_ref()
+                                    .unwrap()
+                                    .buffer()
+                                    .as_entire_binding(),
+                            },
+                        ],
+                    });
+
+                    println!("Created RGB-compatible bind group");
+
+                    // You might need to modify the shader or set a special uniform to handle RGB input
+                    return Ok(bind_group);
+                }
+            }
+
+            return Err(anyhow::anyhow!(
+                "Not enough texture views for YUV to RGB conversion"
+            ));
+        }
+
+        // Regular case with separate Y and UV textures
         let y_texture_view = &texture_view_list[0];
         let uv_texture_view = &texture_view_list[1];
 
@@ -158,6 +209,11 @@ impl Effect for YuvToRgbEffect {
             "Creating bind group with effect layout ID: {:?}",
             effect.bind_group_layout.global_id()
         );
+
+        println!("Y texture format: {:?}", texture_list[0].format());
+        if texture_list.len() > 1 {
+            println!("UV texture format: {:?}", texture_list[1].format());
+        }
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("yuv_to_rgb_bind_group"),
@@ -188,7 +244,7 @@ impl Effect for YuvToRgbEffect {
         });
 
         println!(
-            "Created bind group with layout ID: {:?}",
+            "Created standard YUV bind group with layout ID: {:?}",
             &effect.bind_group_layout.global_id()
         );
 

@@ -118,7 +118,7 @@ impl VideoStream {
             looping: false,
             presentation_queue: VecDeque::new(),
             max_queue_size: DEFAULT_QUEUE_SIZE,
-            is_playing: false,
+            is_playing: true,
             color_space,
             yuv_frame,
             scaler,

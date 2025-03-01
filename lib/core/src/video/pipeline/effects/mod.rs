@@ -44,10 +44,8 @@ pub trait Effect: Send + Sync {
 
 pub struct EffectEntry {
     pub effect: ShaderEffect,
-    pub state: Box<dyn Effect>,
+    pub state: Box<dyn Effect + Send + Sync>,
     pub get_from_video: bool,
-    // pub bind_group: Option<wgpu::BindGroup>,
-    // pub layout_id: Option<wgpu::Id<wgpu::BindGroupLayout>>,
 }
 
 pub struct EffectManager {
@@ -59,7 +57,7 @@ impl EffectManager {
             effects: Vec::new(),
         }
     }
-    pub fn add_effect(&mut self, effect: ShaderEffect, state: Box<dyn Effect>) {
+    pub fn add_effect(&mut self, effect: ShaderEffect, state: Box<dyn Effect + Send + Sync>) {
         println!(
             "Adding effect '{}' with layout ID: {:?}",
             effect.name,

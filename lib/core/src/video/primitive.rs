@@ -73,7 +73,7 @@ impl Primitive for VideoPrimitive {
         let current_frame = FRAME_COUNT.fetch_add(1, Ordering::SeqCst);
 
         // For testing
-        if current_frame >= 3 {
+        if current_frame >= 6 {
             // 0-indexed, so 1 means 2 frames
             // std::process::exit(0); // Forcefully exit the program
         }
@@ -113,7 +113,7 @@ impl Primitive for VideoPrimitive {
             format,
         };
 
-        let mut upscale_shader_effect = upscale_effect.add(device, queue);
+        let upscale_shader_effect = upscale_effect.add(device, queue);
         println!("Effect created successfully");
 
         pipeline_manager
@@ -121,7 +121,7 @@ impl Primitive for VideoPrimitive {
                 pipeline_manager.effects_added,
                 device,
                 queue,
-                &mut upscale_shader_effect,
+                upscale_shader_effect,
                 Box::new(upscale_effect),
             )
             .unwrap();
