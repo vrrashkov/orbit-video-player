@@ -190,6 +190,12 @@ impl Effect for UpscaleEffect {
         } else {
             return Err(anyhow::anyhow!("Pleaase provide texture_list"));
         };
+        println!(
+            "Creating upscale bind group with texture view ptr: {:p}",
+            input_texture_view
+        );
+        println!("Texture dimensions: {:?}", input_texture.size());
+        println!("Texture format: {:?}", input_texture.format());
         println!("Creating Upscale bind group with layout:");
         println!("  Expected bindings: [Texture, Sampler, Uniform]");
         println!("  Layout ID: {:?}", effect.bind_group_layout.global_id());

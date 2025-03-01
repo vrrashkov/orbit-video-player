@@ -73,7 +73,7 @@ impl Primitive for VideoPrimitive {
         let current_frame = FRAME_COUNT.fetch_add(1, Ordering::SeqCst);
 
         // For testing
-        if current_frame >= 6 {
+        if current_frame >= 3 {
             // 0-indexed, so 1 means 2 frames
             // std::process::exit(0); // Forcefully exit the program
         }

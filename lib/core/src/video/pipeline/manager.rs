@@ -109,6 +109,8 @@ impl VideoPipelineManager {
         texture_width: f32,        // New variable
         texture_height: f32,       // New variable
     ) {
+        println!("Texture dimensions: {:?}", output.size());
+        println!("Clip rectangle: {:?}", clip);
         println!("Effect bind group details:");
         println!("  Output texture format: {:?}", output.format());
         println!(
@@ -274,7 +276,28 @@ impl VideoPipelineManager {
                     println!("Error updating first effect: {:?}", e);
                 }
             }
+            if self.effect_manager.len() > 1 {
+                println!("Output texture from YUV to RGB:");
+                if let Some(rgb_texture) = self.texture_manager.get_texture(0) {
+                    println!(
+                        "  Format: {:?}, Size: {:?}",
+                        rgb_texture.format(),
+                        rgb_texture.size()
+                    );
 
+                    // Verify this is being passed to the upscale effect
+                    println!("Input texture for Upscale effect:");
+                    // Check if these match
+                }
+            }
+            if let Some(input_texture) = self.texture_manager.get_texture(0) {
+                println!("Upscale input texture details:");
+                println!("  Texture size: {:?}", input_texture.size());
+                println!("  Texture format: {:?}", input_texture.format());
+
+                // Try to read back a few pixels to check if it has content
+                // (This might not be possible with wgpu directly, but worth checking)
+            }
             // For subsequent effects, use the output from previous effect
             for i in 1..self.effect_manager.len() {
                 // Get the output texture from the previous effect
@@ -312,7 +335,27 @@ impl VideoPipelineManager {
         println!("Textures after preparing YUV to RGB:");
         self.texture_manager.debug_print_state();
     }
+    fn debug_effect_chain(&self) {
+        println!("\nEffect Chain Debug:");
+        println!("Total effects: {}", self.effect_manager.len());
 
+        for (i, effect_entry) in self.effect_manager.effects.iter().enumerate() {
+            println!("Effect {}: {}", i, effect_entry.effect.name);
+            println!("  Format: {:?}", effect_entry.effect.format);
+
+            if let Some(bind_group) = effect_entry.effect.get_bind_group() {
+                println!("  Bind group ID: {:?}", bind_group.global_id());
+            } else {
+                println!("  NO BIND GROUP");
+            }
+
+            if let Some(uniforms) = &effect_entry.effect.uniforms {
+                println!("  Uniforms:");
+                uniforms.debug_print_values();
+            }
+        }
+        println!();
+    }
     // Add this helper method to update uniforms for all effects
     fn update_effect_uniforms(&mut self, queue: &wgpu::Queue) {
         for effect_entry in &mut self.effect_manager.effects {
@@ -327,7 +370,8 @@ impl VideoPipelineManager {
         clip: &iced::Rectangle<u32>,
         video_id: u64,
     ) {
-        println!("Starting draw method for frame {}", video_id);
+        println!("\nStarting draw method for frame {}", video_id);
+        self.debug_effect_chain();
 
         if let Some(video) = self.videos.get(&video_id) {
             // For each effect in the chain, ensure the video textures are properly bound
@@ -389,28 +433,53 @@ impl VideoPipelineManager {
 
         // For each effect in the chain
         for i in 0..self.effect_manager.len() {
-            let output_view = if i == self.effect_manager.len() - 1 {
-                target
-            } else {
-                &views[i + 1]
-            };
-
             let effect = &self.effect_manager.effects[i].effect;
             let bind_group = effect.get_bind_group().expect("Bind group should exist");
 
-            let input_tex = self
-                .texture_manager
-                .get_texture(i)
-                .expect("Texture should exist");
+            // Calculate input and output texture indices
+            let input_index = if i == 0 {
+                // First effect doesn't use intermediate textures as input
+                // (Input comes directly from video textures in bind_group)
+                0
+            } else {
+                // Other effects read from the output of the previous effect
+                i - 1
+            };
 
+            // Last effect writes directly to screen, others to their intermediate texture
+            let output_view = if i == self.effect_manager.len() - 1 {
+                target
+            } else {
+                &views[i] // Effect i writes to texture i
+            };
+
+            println!(
+                "Effect {} ({}): Reading from texture {}, writing to {}",
+                i,
+                effect.name,
+                input_index,
+                if i == self.effect_manager.len() - 1 {
+                    "screen".to_string()
+                } else {
+                    i.to_string()
+                }
+            );
+
+            // Get the texture for this effect
+            let input_texture = self
+                .texture_manager
+                .get_texture(input_index)
+                .expect(&format!("Texture {} should exist", input_index));
+
+            // Apply the effect
             self.apply_effect(
                 encoder,
                 effect,
                 bind_group,
                 output_view,
-                input_tex.as_ref(),
+                input_texture.as_ref(),
                 clip,
-                i < self.effect_manager.len() - 1,
+                i < self.effect_manager.len() - 1, // Clear only intermediate textures
                 render_target_width,
                 render_target_height,
                 texture_width,
