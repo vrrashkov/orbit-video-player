@@ -46,18 +46,29 @@ fn convert_yuv_bt601(y: f32, u: f32, v: f32) -> vec3<f32> {
 
 @vertex
 fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> VertexOutput {
-    var quad = array<vec4<f32>, 6>(
-        vec4<f32>(uniforms.rect.xy, 0.0, 0.0),
-        vec4<f32>(uniforms.rect.zy, 1.0, 0.0),
-        vec4<f32>(uniforms.rect.xw, 0.0, 1.0),
-        vec4<f32>(uniforms.rect.zy, 1.0, 0.0),
-        vec4<f32>(uniforms.rect.zw, 1.0, 1.0),
-        vec4<f32>(uniforms.rect.xw, 0.0, 1.0),
+    // Define a full-screen quad in normalized device coordinates (-1 to 1)
+    var positions = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0),  // bottom left
+        vec2<f32>(1.0, -1.0),   // bottom right
+        vec2<f32>(-1.0, 1.0),   // top left
+        vec2<f32>(1.0, -1.0),   // bottom right
+        vec2<f32>(1.0, 1.0),    // top right
+        vec2<f32>(-1.0, 1.0)    // top left
+    );
+    
+    // Define UVs for the quad (0 to 1)
+    var uvs = array<vec2<f32>, 6>(
+        vec2<f32>(0.0, 1.0),  // bottom left
+        vec2<f32>(1.0, 1.0),  // bottom right
+        vec2<f32>(0.0, 0.0),  // top left
+        vec2<f32>(1.0, 1.0),  // bottom right
+        vec2<f32>(1.0, 0.0),  // top right
+        vec2<f32>(0.0, 0.0)   // top left
     );
 
     var out: VertexOutput;
-    out.uv = quad[in_vertex_index].zw;
-    out.position = vec4<f32>(quad[in_vertex_index].xy, 1.0, 1.0);
+    out.uv = uvs[in_vertex_index];
+    out.position = vec4<f32>(positions[in_vertex_index], 0.0, 1.0);
     return out;
 }
 

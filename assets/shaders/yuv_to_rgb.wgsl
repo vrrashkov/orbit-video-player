@@ -58,10 +58,15 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     output.tex_coords = tex_coords[vertex_index];
     return output;
 }
+
 @fragment
 fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
     let y = textureSample(input_texture_y, s_sampler, tex_coords).r;
-    let uv = textureSample(input_texture_uv, s_sampler, tex_coords).rg;
+    
+    // Important: For UV sampling we need to handle the half-resolution correctly
+    // The UV texture is typically half the size of the Y texture in each dimension
+    let uv_coords = tex_coords;
+    let uv = textureSample(input_texture_uv, s_sampler, uv_coords).rg;
     
     var rgb: vec3<f32>;
     switch (uniforms.color_space) {
@@ -76,15 +81,8 @@ fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
         }
     }
     
-    // Apply brightness
-    rgb = rgb * 1.6;
+    // Apply brightness and clamp
+    rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
     
-    // Apply saturation
-    let luminance = dot(rgb, vec3<f32>(0.299, 0.587, 0.114));
-    rgb = mix(vec3<f32>(luminance), rgb, 1.6);
-    
-    return vec4<f32>(
-        clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 
-        1.0
-    );
+    return vec4<f32>(rgb, 1.0);
 }

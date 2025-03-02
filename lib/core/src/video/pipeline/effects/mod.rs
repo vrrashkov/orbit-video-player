@@ -12,6 +12,7 @@ use std::{
 
 use super::manager::{VideoEntry, VideoPipelineManager};
 
+pub mod comparison;
 pub mod upscale;
 pub mod yuv_to_rgb;
 

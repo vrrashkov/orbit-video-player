@@ -5,11 +5,13 @@ use std::{
     cell::RefCell,
     collections::{btree_map::Entry, BTreeMap},
     num::NonZero,
+    ops::Deref,
     rc::Rc,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
 use crate::video::pipeline::effects::{
+    comparison::ComparisonEffect,
     upscale::{UpscaleEffect, UpscaleEffectState},
     yuv_to_rgb::YuvToRgbEffect,
     Effect,
@@ -72,12 +74,6 @@ impl Primitive for VideoPrimitive {
     ) {
         let current_frame = FRAME_COUNT.fetch_add(1, Ordering::SeqCst);
 
-        // For testing
-        if current_frame >= 3 {
-            // 0-indexed, so 1 means 2 frames
-            // std::process::exit(0); // Forcefully exit the program
-        }
-        dbg!("testttttt 1111");
         let has_manager = storage.has::<VideoPipelineManager>();
         dbg!("Has VideoPipelineManager:", has_manager);
 
@@ -101,33 +97,63 @@ impl Primitive for VideoPrimitive {
             );
         }
 
-        // Check if effects have already been added
-        // if !pipeline_manager.effects_added {
-        let mut upscale_effect = UpscaleEffect {
-            state: UpscaleEffectState {
-                comparison_enabled: self.comparison_enabled,
-                comparison_position: self.comparison_position,
-                color_threshold: 1.,
-                color_blend_mode: 0.5,
-            },
-            format,
-        };
+        // Create a list of effects that should be active based on current settings
+        let mut desired_effects = Vec::new();
 
-        let upscale_shader_effect = upscale_effect.add(device, queue);
-        println!("Effect created successfully");
+        // Always add base effects
+        if !pipeline_manager.has_effect("upscale") {
+            desired_effects.push((
+                "upscale",
+                Box::new(UpscaleEffect {
+                    state: UpscaleEffectState {
+                        color_threshold: 1.0,
+                        color_blend_mode: 0.5,
+                    },
+                    format,
+                }) as Box<dyn Effect + Send + Sync>,
+            ));
+        }
 
-        pipeline_manager
-            .add_effect(
-                pipeline_manager.effects_added,
-                device,
-                queue,
-                upscale_shader_effect,
-                Box::new(upscale_effect),
-            )
-            .unwrap();
+        // Add conditional effects
+        if self.comparison_enabled && !pipeline_manager.has_effect("comparison") {
+            desired_effects.push((
+                "comparison",
+                Box::new(ComparisonEffect {
+                    line_position: self.comparison_position,
+                    format,
+                }) as Box<dyn Effect + Send + Sync>,
+            ));
+        }
 
-        pipeline_manager.effects_added = true;
-        // }
+        // Apply desired effects
+        // Instead of iterating with references
+        for (name, mut effect) in desired_effects {
+            println!("Adding effect: {}", name);
+            let shader_effect = effect.add(device, queue);
+
+            pipeline_manager
+                .add_effect(false, device, queue, shader_effect, effect)
+                .unwrap();
+        }
+
+        // Remove effects that should no longer be active
+        if !self.comparison_enabled {
+            pipeline_manager.remove_effect("comparison");
+        }
+
+        // Update effect parameters for those that are active
+        for effect in &mut pipeline_manager.effect_manager.effects {
+            match effect.effect.name.as_str() {
+                "comparison" => {
+                    effect
+                        .state
+                        .as_mut()
+                        .update_comparison(true, self.comparison_position);
+                }
+                // Can add other conditional effect parameters here
+                _ => {}
+            }
+        }
 
         let physical_size = viewport.physical_size();
         // Resize textures to match viewport
@@ -139,6 +165,7 @@ impl Primitive for VideoPrimitive {
         pipeline_manager
             .texture_manager
             .resize_intermediate_textures(device, size, pipeline_manager.effect_manager.len() + 1);
+
         // Prepare for rendering
         pipeline_manager.prepare(
             device,
@@ -152,17 +179,10 @@ impl Primitive for VideoPrimitive {
             self.color_space,
         );
 
-        // Update and prepare effects
-        for effect in &mut pipeline_manager.effect_manager.effects {
-            effect
-                .state
-                .as_mut()
-                .update_comparison(self.comparison_enabled, self.comparison_position);
-            effect.state.as_mut().prepare(&mut effect.effect, queue);
-        }
+        pipeline_manager.effects_added = true;
 
         // Debug prints
-        println!("Effects count: {}", pipeline_manager.has_effects());
+        println!("Effects count: {}", pipeline_manager.effect_manager.len());
         println!(
             "Texture manager size: {}",
             pipeline_manager.texture_manager.len()

@@ -118,40 +118,17 @@ impl RenderPasses {
             occlusion_query_set: None,
         });
 
-        // Calculate aspect ratios
-        let target_aspect = render_target_width / render_target_height;
-        let texture_aspect = texture_width / texture_height;
-
-        // Calculate scale factors
-        let (viewport_width, viewport_height) = if target_aspect > texture_aspect {
-            // Width constrained by height
-            let height = render_target_height;
-            let width = height * texture_aspect;
-            (width, height)
-        } else {
-            // Height constrained by width
-            let width = render_target_width;
-            let height = width / texture_aspect;
-            (width, height)
-        };
-
-        // Calculate viewport offset to center the content
-        let x_offset = (render_target_width - viewport_width) / 2.0;
-        let y_offset = (render_target_height - viewport_height) / 2.0;
-
-        // Ensure viewport dimensions don't exceed render target
-        let viewport_width = viewport_width.min(render_target_width);
-        let viewport_height = viewport_height.min(render_target_height);
-
-        // Set viewport with calculated dimensions
+        // Simply use the full render target size without any aspect ratio calculations
         pass.set_viewport(
-            x_offset,
-            y_offset,
-            viewport_width,
-            viewport_height,
+            0.0,                  // No x offset
+            0.0,                  // No y offset
+            render_target_width,  // Use full width
+            render_target_height, // Use full height
             0.0,
             1.0,
         );
+
+        // Use clip rectangle for scissor
         pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
 
         println!("Setting pipeline");
@@ -159,24 +136,12 @@ impl RenderPasses {
 
         println!("Setting bind group at index 0");
         pass.set_bind_group(0, bind_group, &[]);
-        println!("Effect pass vertices:");
-        let vertices = [
-            (-1.0, -1.0, 0.0, 1.0),
-            (1.0, -1.0, 1.0, 1.0),
-            (-1.0, 1.0, 0.0, 0.0),
-            (-1.0, 1.0, 0.0, 0.0),
-            (1.0, -1.0, 1.0, 1.0),
-            (1.0, 1.0, 1.0, 0.0),
-        ];
-        for (i, v) in vertices.iter().enumerate() {
-            println!(
-                "  Vertex {}: pos({}, {}), uv({}, {})",
-                i, v.0, v.1, v.2, v.3
-            );
-        }
 
-        // Add viewport debug info
         println!("Effect viewport:");
+        println!(
+            "  Full render target: {}x{}",
+            render_target_width, render_target_height
+        );
         println!("  Clip: {:?}", clip);
 
         pass.draw(0..6, 0..1);

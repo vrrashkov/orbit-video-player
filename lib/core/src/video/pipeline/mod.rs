@@ -2,7 +2,6 @@ use iced_wgpu::wgpu;
 use std::collections::HashMap;
 
 pub mod effects;
-pub mod line;
 pub mod manager;
 pub mod render;
 pub mod state;

@@ -15,7 +15,6 @@ use crate::video::{
 
 use super::{
     effects::{Effect, EffectManager},
-    line::LinePipeline,
     state::PipelineState,
     video::VideoPipeline,
 };
@@ -33,7 +32,6 @@ pub struct VideoEntry {
 pub struct VideoPipelineManager {
     state: PipelineState,
     video_pipeline: VideoPipeline,
-    line_pipeline: LinePipeline,
     pub texture_manager: TextureManager,
     pub effect_manager: EffectManager,
     format: wgpu::TextureFormat,
@@ -49,7 +47,6 @@ impl VideoPipelineManager {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let state = PipelineState::default();
         let video_pipeline = VideoPipeline::new(device, format);
-        let line_pipeline = LinePipeline::new(device, format);
         let mut texture_manager = TextureManager::new(format);
 
         let effect_manager = EffectManager::new();
@@ -67,7 +64,6 @@ impl VideoPipelineManager {
         Self {
             state,
             video_pipeline,
-            line_pipeline,
             texture_manager,
             effect_manager,
             format,
@@ -104,10 +100,10 @@ impl VideoPipelineManager {
         output: &wgpu::Texture,
         clip: &iced::Rectangle<u32>,
         clear: bool,
-        render_target_width: f32,  // New variable
-        render_target_height: f32, // New variable
-        texture_width: f32,        // New variable
-        texture_height: f32,       // New variable
+        render_target_width: f32,
+        render_target_height: f32,
+        texture_width: f32,
+        texture_height: f32,
     ) {
         println!("Texture dimensions: {:?}", output.size());
         println!("Clip rectangle: {:?}", clip);
@@ -236,7 +232,58 @@ impl VideoPipelineManager {
             &mut self.videos,
         );
     }
+    fn prepare_comparison_effect(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        println!("Running prepare_comparison_effect");
+        // Find the comparison effect
+        for i in 0..self.effect_manager.len() {
+            if self.effect_manager.effects[i].effect.name == "comparison" {
+                println!("Found comparison effect (#{}) with RGB source", i);
+                println!("Preparing comparison effect (#{}) with RGB source", i);
 
+                // Always use RGB texture (output of YUV to RGB) as the original
+                let rgb_texture = match self.texture_manager.get_texture(0) {
+                    Some(texture) => texture,
+                    None => {
+                        println!("Error: No RGB texture available for comparison");
+                        return;
+                    }
+                };
+
+                // Get the processed result (last effect's output)
+                let processed_index = i - 1;
+                let processed_texture = match self.texture_manager.get_texture(processed_index) {
+                    Some(texture) => texture,
+                    None => {
+                        println!("Error: No processed texture at index {}", processed_index);
+                        return;
+                    }
+                };
+
+                // Create views for both textures
+                let rgb_view = rgb_texture.create_view(&Default::default());
+                let processed_view = processed_texture.create_view(&Default::default());
+
+                // Create vectors for the comparison effect
+                let views = vec![rgb_view, processed_view];
+                let textures = vec![rgb_texture.as_ref(), processed_texture.as_ref()];
+
+                // Update the comparison effect with both textures
+                let effect_entry = &mut self.effect_manager.effects[i];
+                if let Err(e) = effect_entry.state.update_for_frame(
+                    device,
+                    &mut effect_entry.effect,
+                    &views,
+                    &textures,
+                ) {
+                    println!("Error updating comparison effect: {:?}", e);
+                } else {
+                    println!("Successfully updated comparison effect");
+                }
+
+                break;
+            }
+        }
+    }
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -328,12 +375,31 @@ impl VideoPipelineManager {
                     println!("Failed to get input texture for effect {}", i);
                 }
             }
-
+            if self.effect_manager.len() > 1 {
+                // Update any comparison effects with the correct textures
+                self.prepare_comparison_effect(device, queue);
+            }
             // After updating all effects, ensure the next frame uses the correct textures
             self.update_effect_uniforms(queue);
         }
         println!("Textures after preparing YUV to RGB:");
         self.texture_manager.debug_print_state();
+    }
+    pub fn has_effect(&self, name: &str) -> bool {
+        self.effect_manager
+            .effects
+            .iter()
+            .any(|e| e.effect.name == name)
+    }
+
+    // Remove effect by name
+    pub fn remove_effect(&mut self, name: &str) {
+        if self.has_effect(name) {
+            println!("Removing effect: {}", name);
+            self.effect_manager
+                .effects
+                .retain(|e| e.effect.name != name);
+        }
     }
     fn debug_effect_chain(&self) {
         println!("\nEffect Chain Debug:");
