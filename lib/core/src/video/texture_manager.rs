@@ -8,37 +8,70 @@ use std::{
         Arc,
     },
 };
+use tracing::{debug, info, trace, warn};
 
+/// Manages intermediate textures for effect processing pipelines
+///
+/// Handles creation, storage, and access to textures used between shader effects
+/// in a render pipeline.
 pub struct TextureManager {
     pub intermediate_textures: Vec<std::sync::Arc<wgpu::Texture>>,
     format: wgpu::TextureFormat,
 }
 
 impl TextureManager {
+    /// Get a view for the texture at the specified index
     pub fn get_texture_view(&self, index: usize) -> Option<wgpu::TextureView> {
-        self.intermediate_textures
+        let result = self
+            .intermediate_textures
             .get(index)
-            .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()))
+            .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
+
+        if result.is_none() {
+            trace!("No texture found at index {}", index);
+        }
+
+        result
     }
+
+    /// Get a clone of the Arc<Texture> at the specified index
     pub fn get_texture(&self, index: usize) -> Option<std::sync::Arc<wgpu::Texture>> {
-        self.intermediate_textures.get(index).cloned()
+        let result = self.intermediate_textures.get(index).cloned();
+
+        if let Some(texture) = &result {
+            trace!(
+                "Retrieved texture {}: format={:?}, size={}x{}",
+                index,
+                texture.format(),
+                texture.size().width,
+                texture.size().height
+            );
+        } else {
+            trace!("No texture found at index {}", index);
+        }
+
+        result
     }
+
+    /// Create a new texture manager with the specified format
     pub fn new(format: wgpu::TextureFormat) -> Self {
-        println!("Creating TextureManager with format: {:?}", format);
+        debug!("Creating TextureManager with format: {:?}", format);
         Self {
             intermediate_textures: Vec::new(),
             format,
         }
     }
 
+    /// Create a new intermediate texture with the specified size
     fn create_intermediate_texture(
         &self,
         device: &wgpu::Device,
         size: wgpu::Extent3d,
     ) -> Arc<wgpu::Texture> {
-        println!("Creating intermediate texture:");
-        println!("  Size: {:?}", size);
-        println!("  Format: {:?}", self.format);
+        debug!(
+            "Creating intermediate texture: size={}x{}, format={:?}",
+            size.width, size.height, self.format
+        );
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("effect_intermediate_texture"),
@@ -55,11 +88,15 @@ impl TextureManager {
 
         Arc::new(texture)
     }
+
+    /// Create a texture view with explicit parameters for the texture at the specified index
     pub fn create_texture_view(&self, index: usize) -> Option<wgpu::TextureView> {
         self.get_texture(index).map(|texture| {
-            println!("Creating view for texture {}", index);
-            println!("  Texture format: {:?}", texture.format());
-            println!("  Manager format: {:?}", self.format);
+            trace!(
+                "Creating view for texture {}: format={:?}",
+                index,
+                texture.format()
+            );
 
             texture.create_view(&wgpu::TextureViewDescriptor {
                 label: Some(&format!("intermediate_texture_view_{}", index)),
@@ -73,47 +110,89 @@ impl TextureManager {
             })
         })
     }
+
+    /// Get the texture format used by this manager
     pub fn format(&self) -> wgpu::TextureFormat {
         self.format
     }
+
+    /// Print detailed information about all textures for debugging
     pub fn debug_print_state(&self) {
-        println!("\nTextureManager State:");
-        println!("Format: {:?}", self.format);
-        println!("Number of textures: {}", self.len());
+        debug!(
+            "TextureManager state: format={:?}, count={}",
+            self.format,
+            self.len()
+        );
 
         for (i, texture) in self.intermediate_textures.iter().enumerate() {
-            println!("\nTexture {}:", i);
-            println!("  Format: {:?}", texture.format());
-            println!("  Size: {:?}", texture.size());
-            println!("  Usage: {:?}", texture.usage());
+            debug!(
+                "Texture {}: format={:?}, size={}x{}, usage={:?}",
+                i,
+                texture.format(),
+                texture.size().width,
+                texture.size().height,
+                texture.usage()
+            );
         }
-        println!();
     }
+
+    /// Resize or recreate intermediate textures to match the specified size and count
+    ///
+    /// This is typically called when the video dimensions change or when the
+    /// number of effects in the pipeline changes.
     pub fn resize_intermediate_textures(
         &mut self,
         device: &wgpu::Device,
         size: wgpu::Extent3d,
         num_effects: usize,
     ) {
-        if self.intermediate_textures.len() > num_effects {
+        // Check if we already have enough textures of the right size
+        if !self.intermediate_textures.is_empty() {
             let existing_size = self.intermediate_textures[0].size();
-            if existing_size.width == size.width && existing_size.height == size.height {
+            if existing_size.width == size.width
+                && existing_size.height == size.height
+                && self.intermediate_textures.len() >= num_effects + 1
+            {
+                trace!(
+                    "No need to resize textures - already have {} textures of size {}x{}",
+                    self.intermediate_textures.len(),
+                    size.width,
+                    size.height
+                );
                 return;
             }
         }
 
+        debug!(
+            "Resizing intermediate textures: size={}x{}, count={}",
+            size.width,
+            size.height,
+            num_effects + 1
+        );
+
+        // Clear existing textures and create new ones
         self.intermediate_textures.clear();
 
         for i in 0..=num_effects {
             let texture = self.create_intermediate_texture(device, size);
             self.intermediate_textures.push(texture);
+            trace!("Created intermediate texture {}", i);
         }
+
+        debug!(
+            "Created {} intermediate textures",
+            self.intermediate_textures.len()
+        );
     }
+
+    /// Validate that all textures have the expected format
+    ///
+    /// Returns true if all textures match the manager's format, false otherwise.
     pub fn validate_formats(&self) -> bool {
         let mut valid = true;
         for (i, texture) in self.intermediate_textures.iter().enumerate() {
             if texture.format() != self.format {
-                println!(
+                warn!(
                     "Format mismatch in texture {}: Expected {:?}, got {:?}",
                     i,
                     self.format,
@@ -122,22 +201,19 @@ impl TextureManager {
                 valid = false;
             }
         }
+
+        if valid {
+            trace!(
+                "All {} textures have correct format: {:?}",
+                self.len(),
+                self.format
+            );
+        }
+
         valid
     }
-    // pub fn get_texture(&self, index: usize) -> Option<&wgpu::Texture> {
-    //     let result = self.intermediate_textures.get(index);
-    //     println!("Accessing texture at index {}: {}", index, result.is_some());
-    //     if let Some(texture) = result {
-    //         println!("  Format: {:?}", texture.format());
-    //         println!("  Size: {:?}", texture.size());
-    //     }
-    //     result
-    // }
 
-    // pub fn textures_mut(&mut self) -> &mut Vec<wgpu::Texture> {
-    //     &mut self.intermediate_textures
-    // }
-
+    /// Get the number of intermediate textures
     pub fn len(&self) -> usize {
         self.intermediate_textures.len()
     }

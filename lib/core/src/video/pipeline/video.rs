@@ -4,20 +4,28 @@ use std::{
     num::NonZero,
     sync::atomic::Ordering,
 };
+use tracing::{debug, info, trace, warn};
 
 use crate::video::{color_space::BT709_CONFIG, render_passes::RenderPasses};
 
 use super::{manager::VideoEntry, state::PipelineState, PipelineConfig};
+
+/// Uniform buffer for video pipeline shader
+/// This structure provides all necessary parameters for video rendering
+/// including dimensions, color space conversion, and YUV range information
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Uniforms {
-    pub rect: [f32; 4],
-    pub color_space: [u32; 1],
+    pub rect: [f32; 4],        // Rectangle dimensions [x, y, width, height]
+    pub color_space: [u32; 1], // Color space identifier
     pub y_range: [f32; 2],     // min, max for Y
     pub uv_range: [f32; 2],    // min, max for UV
     pub matrix: [[f32; 3]; 3], // Color conversion matrix
-    pub _pad: [u8; 188],       // Adjusted padding to maintain size
+    pub _pad: [u8; 188],       // Padding to maintain alignment
 }
+
+/// Main pipeline for video rendering
+/// Handles YUV textures and performs color space conversion
 pub struct VideoPipeline {
     pipeline: wgpu::RenderPipeline,
     bg0_layout: wgpu::BindGroupLayout,
@@ -26,7 +34,9 @@ pub struct VideoPipeline {
 }
 
 impl VideoPipeline {
+    /// Create a new video pipeline with the given texture format
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+        // Load shader from embedded assets
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("video_shader"),
             source: wgpu::ShaderSource::Wgsl(
@@ -34,6 +44,11 @@ impl VideoPipeline {
             ),
         });
 
+        // Create bind group layout with:
+        // 1. Y texture plane (binding 0)
+        // 2. UV texture plane (binding 1)
+        // 3. Texture sampler (binding 2)
+        // 4. Uniforms buffer (binding 3)
         let bg0_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("video_bind_group_layout"),
             entries: &[
@@ -76,12 +91,14 @@ impl VideoPipeline {
             ],
         });
 
+        // Create pipeline layout
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("video_pipeline_layout"),
             bind_group_layouts: &[&bg0_layout],
             push_constant_ranges: &[],
         });
 
+        // Create render pipeline
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("video_pipeline"),
             layout: Some(&layout),
@@ -109,6 +126,7 @@ impl VideoPipeline {
             multiview: None,
         });
 
+        // Create texture sampler
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("video_sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -132,6 +150,7 @@ impl VideoPipeline {
         }
     }
 
+    /// Draw video frame to the target texture with existing content
     pub fn draw(
         &self,
         target: &wgpu::TextureView,
@@ -149,6 +168,7 @@ impl VideoPipeline {
         );
     }
 
+    /// Draw video frame to the target texture, clearing existing content
     pub fn draw_clear(
         &self,
         target: &wgpu::TextureView,
@@ -156,15 +176,13 @@ impl VideoPipeline {
         clip: &iced::Rectangle<u32>,
         video: &VideoEntry,
     ) {
-        println!("Video pipeline draw_clear:");
-        println!("  Target texture format: {:?}", target);
-        println!("  Video Y texture format: {:?}", video.texture_y.format());
-        println!("  Video UV texture format: {:?}", video.texture_uv.format());
-        println!(
-            "  First video frame: {}",
-            std::any::type_name_of_val(&video)
+        trace!(
+            "Drawing video with clear: clip={:?}, video_y_format={:?}, video_uv_format={:?}",
+            clip,
+            video.texture_y.format(),
+            video.texture_uv.format()
         );
-        println!("  Clip rect: {:?}", clip);
+
         RenderPasses::draw_video_pass(
             &self.pipeline,
             target,
@@ -175,6 +193,9 @@ impl VideoPipeline {
         );
     }
 
+    /// Upload video frame data to GPU textures
+    ///
+    /// Creates new video entry if needed and uploads Y and UV plane data
     pub fn upload(
         &mut self,
         device: &wgpu::Device,
@@ -185,15 +206,20 @@ impl VideoPipeline {
         frame: &[u8],
         videos: &mut BTreeMap<u64, VideoEntry>,
     ) {
+        // Calculate uniform buffer alignment requirements
         let uniform_alignment = device.limits().min_uniform_buffer_offset_alignment as usize;
         let uniform_size = std::mem::size_of::<Uniforms>();
         let aligned_uniform_size =
             (uniform_size + uniform_alignment - 1) & !(uniform_alignment - 1);
 
+        // Create new video entry if needed
         if let Entry::Vacant(entry) = videos.entry(video_id) {
-            println!("Uploading new frame data:");
-            println!("  Video ID: {}", video_id);
-            println!("  Frame size: {}x{}", width, height);
+            debug!(
+                "Creating new video entry: id={}, dimensions={}x{}",
+                video_id, width, height
+            );
+
+            // Create Y plane texture (full resolution)
             let texture_y = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("video_texture_y"),
                 size: wgpu::Extent3d {
@@ -209,6 +235,7 @@ impl VideoPipeline {
                 view_formats: &[],
             });
 
+            // Create UV plane texture (half resolution in each dimension)
             let texture_uv = device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("video_texture_uv"),
                 size: wgpu::Extent3d {
@@ -227,6 +254,7 @@ impl VideoPipeline {
             let view_y = texture_y.create_view(&Default::default());
             let view_uv = texture_uv.create_view(&Default::default());
 
+            // Create uniform buffer with space for multiple frames
             let instances = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("video_uniform_buffer"),
                 size: (256 * aligned_uniform_size) as u64,
@@ -234,6 +262,7 @@ impl VideoPipeline {
                 mapped_at_creation: false,
             });
 
+            // Create bind group connecting textures, sampler and uniforms
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("video_bind_group"),
                 layout: &self.bg0_layout,
@@ -261,6 +290,7 @@ impl VideoPipeline {
                 ],
             });
 
+            // Insert new video entry
             entry.insert(VideoEntry {
                 texture_y,
                 texture_uv,
@@ -273,7 +303,9 @@ impl VideoPipeline {
             });
         }
 
+        // Upload frame data to GPU textures
         if let Some(video) = videos.get(&video_id) {
+            // Upload Y plane data
             queue.write_texture(
                 wgpu::ImageCopyTexture {
                     texture: &video.texture_y,
@@ -294,6 +326,7 @@ impl VideoPipeline {
                 },
             );
 
+            // Upload UV plane data
             let uv_data = &frame[(width * height) as usize..];
             queue.write_texture(
                 wgpu::ImageCopyTexture {
@@ -314,9 +347,21 @@ impl VideoPipeline {
                     depth_or_array_layers: 1,
                 },
             );
+
+            trace!(
+                "Uploaded frame data for video {}: Y size={}x{}, UV size={}x{}",
+                video_id,
+                width,
+                height,
+                width / 2,
+                height / 2
+            );
         }
     }
 
+    /// Prepare video for rendering by updating uniform buffer
+    ///
+    /// Sets up color space conversion parameters and frame dimensions
     pub fn prepare(
         &self,
         device: &wgpu::Device,
@@ -329,17 +374,26 @@ impl VideoPipeline {
     ) {
         if let Some(video) = videos.get_mut(&video_id) {
             let prepare_index = video.prepare_index.load(Ordering::Relaxed);
-            println!("Preparing frame:");
-            println!("  Video ID: {}", video_id);
-            println!("  Prepare index: {}", prepare_index);
+            trace!(
+                "Preparing video {}: frame={}, bounds={:?}",
+                video_id,
+                prepare_index,
+                bounds
+            );
 
+            // Get color space configuration (defaulting to BT.709 if not recognized)
             let config = match color_space {
                 ffmpeg_next::color::Space::BT709 => BT709_CONFIG,
-                _ => BT709_CONFIG,
+                _ => {
+                    debug!(
+                        "Using default BT709 config for unsupported color space: {:?}",
+                        color_space
+                    );
+                    BT709_CONFIG
+                }
             };
 
-            println!("Color Space Details:");
-            println!("  Color Space: {:?}", color_space);
+            // Create uniform buffer with video parameters
             let uniforms = Uniforms {
                 rect: [bounds.x, bounds.y, bounds.width, bounds.height],
                 color_space: [color_space as u32],
@@ -349,18 +403,19 @@ impl VideoPipeline {
                 _pad: [0; 188],
             };
 
-            let offset = video.prepare_index.load(Ordering::Relaxed) * video.aligned_uniform_size;
+            // Calculate offset in uniform buffer ring and write new data
+            let offset = prepare_index * video.aligned_uniform_size;
             queue.write_buffer(
                 &video.instances,
                 offset as u64,
                 bytemuck::cast_slice(&[uniforms]),
             );
 
-            // video.prepare_index.fetch_add(1, Ordering::Relaxed);
-            // video.render_index.store(0, Ordering::Relaxed);
-
+            // Update prepare index for next frame (wrapping at 256)
             let next_index = (prepare_index + 1) % 256;
             video.prepare_index.store(next_index, Ordering::Relaxed);
+        } else {
+            warn!("Attempted to prepare non-existent video: {}", video_id);
         }
     }
 }

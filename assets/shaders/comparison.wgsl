@@ -49,16 +49,17 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         in.uv.x < uniforms.line_position
     );
     
-    // Create a line effect with a custom color
+    // Create a line effect with a dark color with opacity
     if (line_distance < 0.002) {
-        // Use a blue line color
-        let line_color = vec3<f32>(0.0, 0.5, 1.0); // Sky blue
+        // Dark line color with opacity
+        let line_color = vec3<f32>(0.1, 0.1, 0.1); // Almost black
+        let opacity = 0.9; // 70% opacity
         
-        // Blend the line color with the original content (75% line, 25% original)
+        // Blend the line color with the original content
         return vec4<f32>(
-            line_color.r * 0.75 + color.r * 0.25,
-            line_color.g * 0.75 + color.g * 0.25,
-            line_color.b * 0.75 + color.b * 0.25,
+            line_color.r * opacity + color.r * (1.0 - opacity),
+            line_color.g * opacity + color.g * (1.0 - opacity),
+            line_color.b * opacity + color.b * (1.0 - opacity),
             color.a
         );
     } else {

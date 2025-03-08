@@ -1,6 +1,6 @@
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use nebula_core::video::stream::VideoStream;
-use std::{cell::RefCell, marker::PhantomData};
+use std::{cell::RefCell, collections::HashMap, marker::PhantomData};
 
 pub mod compariosn_slider;
 pub mod element;
@@ -23,6 +23,7 @@ where
     on_comparison_drag_start: Option<Message>,
     on_comparison_drag_end: Option<Message>,
     on_comparison_position_change: Option<Message>,
+    shader_selections: HashMap<String, bool>,
     _phantom: PhantomData<(Theme, Renderer)>,
 }
 
@@ -41,11 +42,16 @@ where
             comparison_enabled: false,
             comparison_position: 0.5,
             dragging_comparison: false,
+            shader_selections: HashMap::new(),
             _phantom: Default::default(),
             on_comparison_drag_start: None,
             on_comparison_drag_end: None,
             on_comparison_position_change: None,
         }
+    }
+    pub fn shader_selections(mut self, selections: HashMap<String, bool>) -> Self {
+        self.shader_selections = selections;
+        self
     }
     pub fn comparison_enabled(mut self, enabled: bool) -> Self {
         self.comparison_enabled = enabled;

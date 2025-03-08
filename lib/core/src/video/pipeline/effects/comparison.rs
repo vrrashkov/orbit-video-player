@@ -6,7 +6,12 @@ use crate::video::{
 };
 use iced_wgpu::wgpu::{self, Texture, TextureView};
 use std::{fs, num::NonZero};
+use tracing::{debug, error, info, trace, warn};
 
+/// Effect for showing a side-by-side comparison of original and processed video
+///
+/// This effect renders a split view with original video on one side and processed video
+/// on the other, with a draggable dividing line.
 #[derive(Clone, Debug)]
 pub struct ComparisonEffect {
     pub line_position: f32, // 0.0 to 1.0 for split position
@@ -14,12 +19,19 @@ pub struct ComparisonEffect {
 }
 
 impl Effect for ComparisonEffect {
+    /// Create a new comparison effect shader
     fn add(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> ShaderEffect {
+        debug!(
+            "Creating comparison effect shader with line position: {}",
+            self.line_position
+        );
+
         // Create uniforms for the line position
         let mut shader_uniforms = ShaderUniforms::new(device, 3);
         shader_uniforms.set_uniform("line_position", UniformValue::Float(self.line_position));
         shader_uniforms.update_buffer(queue);
 
+        // Create bind group layout with:
         // - binding 0: original video texture
         // - binding 1: processed result texture
         // - binding 2: sampler
@@ -63,21 +75,26 @@ impl Effect for ComparisonEffect {
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: Some(NonZero::new(4).unwrap()),
+                        min_binding_size: Some(NonZero::new(4).unwrap()), // Size of a float
                     },
                     count: None,
                 },
             ],
         });
 
+        // Load the comparison shader from embedded assets
         let shader_source = include_str!("../../../../../../assets/shaders/comparison.wgsl");
-        // Create shader effect
+
+        // Create and return the shader effect
+        debug!("Building comparison shader effect");
         ShaderEffectBuilder::new("comparison")
             .with_shader_source(shader_source.into())
             .with_bind_group_layout(bind_group_layout)
             .with_uniforms(shader_uniforms)
             .build(device, queue, self.format)
     }
+
+    /// Update the effect for a new frame with provided textures
     fn update_for_frame(
         &mut self,
         device: &wgpu::Device,
@@ -85,19 +102,24 @@ impl Effect for ComparisonEffect {
         texture_view_list: &[TextureView],
         texture_list: &[&Texture],
     ) -> anyhow::Result<()> {
-        // If we're in initial setup and only received one texture
+        // Handle the case where we don't have both textures yet
         if texture_view_list.len() < 2 {
-            println!("Comparison effect needs two textures but only received {}. Creating temporary bind group.", texture_view_list.len());
+            warn!(
+                "Comparison effect needs two textures but only received {}. Creating temporary bind group.", 
+                texture_view_list.len()
+            );
 
             if texture_view_list.is_empty() {
+                error!("No textures provided for comparison effect");
                 return Err(anyhow::anyhow!(
                     "No textures provided for comparison effect"
                 ));
             }
 
-            // During setup, we'll just use the same texture for both input and output
+            // During setup, we'll just use the same texture for both original and processed
             // This temporary bind group will be replaced by prepare_comparison_effect later
             let texture_view = &texture_view_list[0];
+            debug!("Using single texture for both sides of comparison temporarily");
 
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("initial_comparison_bind_group"),
@@ -128,26 +150,31 @@ impl Effect for ComparisonEffect {
             });
 
             effect.update_bind_group(bind_group);
-            println!("Created initial bind group for comparison effect (will be updated later)");
+            debug!("Created initial temporary bind group for comparison effect");
             return Ok(());
         }
 
-        // Normal case - we have both textures
+        // Normal case - we have both textures (original and processed)
+        trace!("Creating comparison bind group with both original and processed textures");
         let bind_group = self.create_bind_group(device, effect, texture_view_list, texture_list)?;
         effect.update_bind_group(bind_group);
+        trace!("Updated comparison effect bind group successfully");
 
         Ok(())
     }
 
+    /// Update uniform values before rendering
     fn prepare(&mut self, effect: &mut ShaderEffect, queue: &wgpu::Queue) {
         // Update uniforms if needed
         if let Some(uniforms) = &mut effect.uniforms {
             // Update the line position uniform
+            trace!("Updating comparison line position: {}", self.line_position);
             uniforms.set_uniform("line_position", UniformValue::Float(self.line_position));
             uniforms.update_buffer(queue);
         }
     }
 
+    /// Create the bind group connecting textures to the shader
     fn create_bind_group(
         &self,
         device: &wgpu::Device,
@@ -156,6 +183,7 @@ impl Effect for ComparisonEffect {
         texture_list: &[&Texture],
     ) -> anyhow::Result<wgpu::BindGroup> {
         if texture_view_list.len() < 2 {
+            error!("Comparison effect requires two texture views: original and processed");
             return Err(anyhow::anyhow!(
                 "Comparison effect requires two texture views: original and processed"
             ));
@@ -165,10 +193,12 @@ impl Effect for ComparisonEffect {
         let original_view = &texture_view_list[0];
         let processed_view = &texture_view_list[1];
 
-        // Debug info
-        println!("Creating comparison bind group");
-        println!("  Original texture format: {:?}", texture_list[0].format());
-        println!("  Processed texture format: {:?}", texture_list[1].format());
+        // Log texture details for debugging
+        trace!(
+            "Creating comparison bind group: original={:?}, processed={:?}",
+            texture_list[0].format(),
+            texture_list[1].format()
+        );
 
         // Create bind group with both textures
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -199,11 +229,21 @@ impl Effect for ComparisonEffect {
             ],
         });
 
+        debug!("Created comparison bind group with both textures");
         Ok(bind_group)
     }
+
+    /// Update the comparison mode parameters
     fn update_comparison(&mut self, _enable: bool, position: f32) {
+        trace!(
+            "Updating comparison line position: {} -> {}",
+            self.line_position,
+            position
+        );
         self.line_position = position;
     }
+
+    /// Create a clone of this effect
     fn clone_box(&self) -> Box<dyn Effect> {
         Box::new(self.clone())
     }

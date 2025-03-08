@@ -9,7 +9,7 @@ use tracing_subscriber::FmtSubscriber;
 fn main() -> iced::Result {
     env_logger::init();
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::DEBUG)
+        .with_max_level(Level::INFO)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");

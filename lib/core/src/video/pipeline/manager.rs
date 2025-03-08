@@ -4,6 +4,7 @@ use std::{
     ops::Deref,
     sync::{atomic::AtomicUsize, Arc},
 };
+use tracing::{debug, error, info, trace, warn};
 
 use crate::video::{
     pipeline::effects::yuv_to_rgb::YuvToRgbEffect,
@@ -18,17 +19,21 @@ use super::{
     state::PipelineState,
     video::VideoPipeline,
 };
-pub struct VideoEntry {
-    pub texture_y: wgpu::Texture,
-    pub texture_uv: wgpu::Texture,
-    pub instances: wgpu::Buffer,
-    pub bg0: wgpu::BindGroup,
-    pub alive: bool,
 
-    pub prepare_index: AtomicUsize,
-    pub render_index: AtomicUsize,
-    pub aligned_uniform_size: usize,
+/// Represents a single video entry with associated GPU resources
+pub struct VideoEntry {
+    pub texture_y: wgpu::Texture,  // Y plane texture
+    pub texture_uv: wgpu::Texture, // UV plane texture (chroma)
+    pub instances: wgpu::Buffer,   // Uniform buffer for rendering
+    pub bg0: wgpu::BindGroup,      // Bind group connecting textures and uniforms
+    pub alive: bool,               // Whether this video is still active
+
+    pub prepare_index: AtomicUsize,  // Current prepare buffer index
+    pub render_index: AtomicUsize,   // Current render buffer index
+    pub aligned_uniform_size: usize, // Size of each uniform entry, aligned to GPU requirements
 }
+
+/// Main manager for video pipelines and effect chains
 pub struct VideoPipelineManager {
     state: PipelineState,
     video_pipeline: VideoPipeline,
@@ -38,24 +43,29 @@ pub struct VideoPipelineManager {
     videos: BTreeMap<u64, VideoEntry>,
     pub effects_added: bool,
 }
+
+/// Contains information about a texture for effect processing
 pub struct TextureInfo {
     pub views: Vec<wgpu::TextureView>,
     pub format: wgpu::TextureFormat,
     pub size: wgpu::Extent3d,
 }
+
 impl VideoPipelineManager {
+    /// Create a new video pipeline manager with the specified texture format
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         let state = PipelineState::default();
         let video_pipeline = VideoPipeline::new(device, format);
         let mut texture_manager = TextureManager::new(format);
-
         let effect_manager = EffectManager::new();
+
         if !texture_manager.validate_formats() {
-            println!("WARNING: Format inconsistency detected");
+            warn!("Format inconsistency detected in texture manager");
         }
-        // Create initial textures
+
+        // Create initial textures with minimal size (will be resized later)
         let initial_size = wgpu::Extent3d {
-            width: 1, // Will be resized on first video
+            width: 1,
             height: 1,
             depth_or_array_layers: 1,
         };
@@ -71,6 +81,8 @@ impl VideoPipelineManager {
             effects_added: false,
         }
     }
+
+    /// Resize intermediate textures based on video dimensions
     pub fn resize_for_effects(&mut self, device: &wgpu::Device) {
         if let Some(video) = self.videos.values().next() {
             let extent = video.texture_y.size();
@@ -83,14 +95,21 @@ impl VideoPipelineManager {
         }
     }
 
+    /// Resize intermediate textures to the specified size
     fn resize_intermediate_textures(&mut self, device: &wgpu::Device, size: wgpu::Extent3d) {
-        println!("Resizing intermediate textures with size: {:?}", size);
+        debug!(
+            "Resizing intermediate textures to {}x{}",
+            size.width, size.height
+        );
+
         self.texture_manager.resize_intermediate_textures(
             device,
             size,
-            self.effect_manager.len() + 1, // Make sure we have enough textures
+            self.effect_manager.len() + 1, // Ensure we have enough textures
         );
     }
+
+    /// Apply a shader effect to an input texture and write to output texture
     fn apply_effect(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -105,46 +124,42 @@ impl VideoPipelineManager {
         texture_width: f32,
         texture_height: f32,
     ) {
-        println!("Texture dimensions: {:?}", output.size());
-        println!("Clip rectangle: {:?}", clip);
-        println!("Effect bind group details:");
-        println!("  Output texture format: {:?}", output.format());
-        println!(
-            "  Bind group layout ID: {:?}",
+        trace!(
+            "Applying effect '{}': output_format={:?}, dims={}x{}",
+            effect.name,
+            output.format(),
+            output.size().width,
+            output.size().height
+        );
+
+        trace!(
+            "Effect bind group layout ID: {:?}",
             effect.bind_group_layout.global_id()
         );
-        println!("Applying effect with:");
-        println!("  Effect name: {}", effect.name);
-        println!(
-            "  Effect bind group layout ID: {:?}",
-            effect.bind_group_layout.global_id()
-        );
-        println!("  Using bind group with shader: {}", effect.name);
-        // Debug the uniforms if they exist
+
+        // Log uniform values at trace level
         if let Some(uniforms) = &effect.uniforms {
             uniforms.debug_print_values();
         }
 
-        // Calculate scaling factors based on render target and texture dimensions
+        // Calculate scaling factors for stretching texture
         let scale_x = render_target_width / texture_width;
         let scale_y = render_target_height / texture_height;
-
-        // Calculate corrected width and height for stretching the texture
         let clip_width = clip.width as f32;
         let clip_height = clip.height as f32;
-
         let corrected_width = clip_width * scale_x;
         let corrected_height = clip_height * scale_y;
 
-        // Update the effect pass by passing the adjusted values to the RenderPasses function
-        println!(
-            "Setting stretched viewport with x: {}, y: {}, texture_width: {}, texture_height: {}",
-            clip.x as f32, clip.y as f32, texture_width, texture_height
+        trace!(
+            "Viewport setup: target={}x{}, texture={}x{}, clear={}",
+            render_target_width,
+            render_target_height,
+            texture_width,
+            texture_height,
+            clear
         );
-        println!(
-            "Setting stretched viewport with x: {}, y: {}, render_target_width: {}, render_target_height: {}",
-            clip.x as f32, clip.y as f32, render_target_width, render_target_height
-        );
+
+        // Apply the effect using the render passes utility
         RenderPasses::apply_effect(
             effect,
             encoder,
@@ -159,6 +174,7 @@ impl VideoPipelineManager {
         );
     }
 
+    /// Remove inactive videos from memory
     pub fn cleanup(&mut self) {
         let ids: Vec<_> = self
             .videos
@@ -166,35 +182,47 @@ impl VideoPipelineManager {
             .filter_map(|(id, entry)| (!entry.alive).then_some(*id))
             .collect();
 
-        for id in ids {
-            if let Some(video) = self.videos.remove(&id) {
-                video.texture_y.destroy();
-                video.texture_uv.destroy();
-                video.instances.destroy();
+        if !ids.is_empty() {
+            debug!("Cleaning up {} inactive videos", ids.len());
+
+            for id in ids {
+                if let Some(video) = self.videos.remove(&id) {
+                    trace!("Destroying resources for video {}", id);
+                    video.texture_y.destroy();
+                    video.texture_uv.destroy();
+                    video.instances.destroy();
+                }
             }
         }
     }
 
+    /// Get a video entry by ID
     pub fn get_video(&self, video_id: u64) -> Option<&VideoEntry> {
         self.videos.get(&video_id)
     }
 
+    /// Check if there are any active effects
     pub fn has_effects(&self) -> bool {
         !self.effect_manager.is_empty()
     }
 
+    /// Remove all effects from the pipeline
     pub fn clear_effects(&mut self) {
+        debug!("Clearing all effects from pipeline");
         self.effect_manager.clear();
     }
 
+    /// Update the pipeline state
     pub fn update_state(&mut self, new_state: PipelineState) {
         self.state = new_state;
     }
 
+    /// Get the current pipeline state
     pub fn get_state(&self) -> &PipelineState {
         &self.state
     }
 
+    /// Upload a new video frame to GPU textures
     pub fn upload_frame(
         &mut self,
         device: &wgpu::Device,
@@ -208,12 +236,18 @@ impl VideoPipelineManager {
         let is_new_video = !self.videos.contains_key(&video_id);
 
         if is_new_video {
+            debug!(
+                "Creating new video entry: id={}, size={}x{}",
+                video_id, width, height
+            );
+
             let size = wgpu::Extent3d {
                 width,
                 height,
                 depth_or_array_layers: 1,
             };
 
+            // Check if we need to resize intermediate textures
             let needs_resize = if let Some(texture) = self.texture_manager.get_texture(0) {
                 let current_size = texture.size();
                 current_size.width != width || current_size.height != height
@@ -222,10 +256,12 @@ impl VideoPipelineManager {
             };
 
             if needs_resize {
+                debug!("Resizing intermediate textures for new video size");
                 self.resize_intermediate_textures(device, size);
             }
         }
 
+        // Upload frame data to GPU
         self.video_pipeline.upload(
             device,
             queue,
@@ -236,19 +272,21 @@ impl VideoPipelineManager {
             &mut self.videos,
         );
     }
+
+    /// Prepare the comparison effect with original and processed textures
     fn prepare_comparison_effect(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        println!("Running prepare_comparison_effect");
+        trace!("Preparing comparison effect");
+
         // Find the comparison effect
         for i in 0..self.effect_manager.len() {
             if self.effect_manager.effects[i].effect.name == "comparison" {
-                println!("Found comparison effect (#{}) with RGB source", i);
-                println!("Preparing comparison effect (#{}) with RGB source", i);
+                debug!("Found comparison effect at position {}", i);
 
-                // Always use RGB texture (output of YUV to RGB) as the original
+                // Use RGB texture (output of YUV to RGB) as the original
                 let rgb_texture = match self.texture_manager.get_texture(0) {
                     Some(texture) => texture,
                     None => {
-                        println!("Error: No RGB texture available for comparison");
+                        warn!("No RGB texture available for comparison");
                         return;
                     }
                 };
@@ -258,7 +296,10 @@ impl VideoPipelineManager {
                 let processed_texture = match self.texture_manager.get_texture(processed_index) {
                     Some(texture) => texture,
                     None => {
-                        println!("Error: No processed texture at index {}", processed_index);
+                        warn!(
+                            "No processed texture available at index {}",
+                            processed_index
+                        );
                         return;
                     }
                 };
@@ -279,15 +320,17 @@ impl VideoPipelineManager {
                     &views,
                     &textures,
                 ) {
-                    println!("Error updating comparison effect: {:?}", e);
+                    error!("Failed to update comparison effect: {}", e);
                 } else {
-                    println!("Successfully updated comparison effect");
+                    trace!("Successfully updated comparison effect");
                 }
 
                 break;
             }
         }
     }
+
+    /// Prepare the pipeline for rendering a frame
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -324,31 +367,22 @@ impl VideoPipelineManager {
                     &views,
                     &textures,
                 ) {
-                    println!("Error updating first effect: {:?}", e);
+                    error!("Failed to update first effect: {}", e);
                 }
             }
+
+            // Log texture details for debugging
             if self.effect_manager.len() > 1 {
-                println!("Output texture from YUV to RGB:");
                 if let Some(rgb_texture) = self.texture_manager.get_texture(0) {
-                    println!(
-                        "  Format: {:?}, Size: {:?}",
+                    trace!(
+                        "YUV to RGB output: format={:?}, size={}x{}",
                         rgb_texture.format(),
-                        rgb_texture.size()
+                        rgb_texture.size().width,
+                        rgb_texture.size().height
                     );
-
-                    // Verify this is being passed to the upscale effect
-                    println!("Input texture for Upscale effect:");
-                    // Check if these match
                 }
             }
-            if let Some(input_texture) = self.texture_manager.get_texture(0) {
-                println!("Upscale input texture details:");
-                println!("  Texture size: {:?}", input_texture.size());
-                println!("  Texture format: {:?}", input_texture.format());
 
-                // Try to read back a few pixels to check if it has content
-                // (This might not be possible with wgpu directly, but worth checking)
-            }
             // For subsequent effects, use the output from previous effect
             for i in 1..self.effect_manager.len() {
                 // Get the output texture from the previous effect
@@ -371,24 +405,30 @@ impl VideoPipelineManager {
                         &current_views,
                         &current_textures,
                     ) {
-                        println!("Error updating effect {}: {:?}", i, e);
+                        error!("Failed to update effect {}: {}", i, e);
                     } else {
-                        println!("Successfully updated effect {}", i);
+                        trace!("Updated effect {} successfully", i);
                     }
                 } else {
-                    println!("Failed to get input texture for effect {}", i);
+                    warn!("No input texture available for effect {}", i);
                 }
             }
+
+            // Handle special case for comparison effect
             if self.effect_manager.len() > 1 {
-                // Update any comparison effects with the correct textures
                 self.prepare_comparison_effect(device, queue);
             }
-            // After updating all effects, ensure the next frame uses the correct textures
+
+            // Update uniform values for all effects
             self.update_effect_uniforms(queue);
         }
-        println!("Textures after preparing YUV to RGB:");
+
+        // Log texture state at trace level
+        trace!("Texture state after preparing YUV to RGB:");
         self.texture_manager.debug_print_state();
     }
+
+    /// Check if an effect with the given name exists
     pub fn has_effect(&self, name: &str) -> bool {
         self.effect_manager
             .effects
@@ -396,43 +436,45 @@ impl VideoPipelineManager {
             .any(|e| e.effect.name == name)
     }
 
-    // Remove effect by name
+    /// Remove an effect by name
     pub fn remove_effect(&mut self, name: &str) {
         if self.has_effect(name) {
-            println!("Removing effect: {}", name);
+            debug!("Removing effect: {}", name);
             self.effect_manager
                 .effects
                 .retain(|e| e.effect.name != name);
         }
     }
+
+    /// Log the current effect chain for debugging
     fn debug_effect_chain(&self) {
-        println!("\nEffect Chain Debug:");
-        println!("Total effects: {}", self.effect_manager.len());
+        debug!("Effect Chain: {} total effects", self.effect_manager.len());
 
         for (i, effect_entry) in self.effect_manager.effects.iter().enumerate() {
-            println!("Effect {}: {}", i, effect_entry.effect.name);
-            println!("  Format: {:?}", effect_entry.effect.format);
+            debug!("Effect {}: {}", i, effect_entry.effect.name);
+            debug!("  Format: {:?}", effect_entry.effect.format);
 
             if let Some(bind_group) = effect_entry.effect.get_bind_group() {
-                println!("  Bind group ID: {:?}", bind_group.global_id());
+                debug!("  Bind group ID: {:?}", bind_group.global_id());
             } else {
-                println!("  NO BIND GROUP");
+                debug!("  NO BIND GROUP");
             }
 
             if let Some(uniforms) = &effect_entry.effect.uniforms {
-                println!("  Uniforms:");
+                trace!("  Uniforms:");
                 uniforms.debug_print_values();
             }
         }
-        println!();
     }
-    // Add this helper method to update uniforms for all effects
+
+    /// Update uniforms for all effects
     fn update_effect_uniforms(&mut self, queue: &wgpu::Queue) {
         for effect_entry in &mut self.effect_manager.effects {
             effect_entry.state.prepare(&mut effect_entry.effect, queue);
         }
     }
 
+    /// Draw the current frame to the target
     pub fn draw(
         &self,
         target: &wgpu::TextureView,
@@ -440,15 +482,15 @@ impl VideoPipelineManager {
         clip: &iced::Rectangle<u32>,
         video_id: u64,
     ) {
-        println!("\nStarting draw method for frame {}", video_id);
+        trace!("Drawing video frame for id={}", video_id);
+
+        // Log effect chain and texture details at debug level
         self.debug_effect_chain();
 
-        // Add debug logs here
-        println!("\nSize Debug Information:");
-        println!("UI clip bounds: {}x{}", clip.width, clip.height);
+        debug!("UI clip bounds: {}x{}", clip.width, clip.height);
 
         if let Some(video) = self.videos.get(&video_id) {
-            println!(
+            debug!(
                 "Video source size: {}x{}",
                 video.texture_y.size().width,
                 video.texture_y.size().height
@@ -457,7 +499,7 @@ impl VideoPipelineManager {
             // Log all intermediate texture sizes
             for i in 0..self.texture_manager.len() {
                 if let Some(texture) = self.texture_manager.get_texture(i) {
-                    println!(
+                    debug!(
                         "Intermediate texture {}: {}x{}",
                         i,
                         texture.size().width,
@@ -478,9 +520,15 @@ impl VideoPipelineManager {
                 let render_target_width = clip.width as f32;
                 let render_target_height = clip.height as f32;
 
-                println!("clip {:?}", &clip);
-                println!("render_target_width {}", &render_target_width);
-                println!("render_target_height {}", &render_target_height);
+                trace!(
+                    "Render dimensions: target={}x{}, texture={}x{}, clip={:?}",
+                    render_target_width,
+                    render_target_height,
+                    texture_width,
+                    texture_height,
+                    clip
+                );
+
                 // Process the effect chain with the current frame's textures
                 self.process_effect_chain(
                     encoder,
@@ -494,12 +542,13 @@ impl VideoPipelineManager {
                 );
             } else {
                 // Fallback to basic video rendering if no effects
+                trace!("No effects active, using basic video rendering");
                 self.video_pipeline.draw(target, encoder, clip, video);
             }
         }
     }
 
-    // Add this helper method to properly process the effect chain
+    /// Process the entire effect chain for rendering
     fn process_effect_chain(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -513,7 +562,11 @@ impl VideoPipelineManager {
     ) {
         // Ensure we have enough textures
         if self.texture_manager.len() <= self.effect_manager.len() {
-            println!("Not enough textures for effect chain");
+            warn!(
+                "Not enough textures for effect chain ({} textures, {} effects)",
+                self.texture_manager.len(),
+                self.effect_manager.len()
+            );
             return;
         }
 
@@ -523,7 +576,7 @@ impl VideoPipelineManager {
             if let Some(view) = self.texture_manager.create_texture_view(i) {
                 views.push(view);
             } else {
-                println!("Failed to create view {}", i);
+                error!("Failed to create view for texture {}", i);
                 return;
             }
         }
@@ -531,7 +584,13 @@ impl VideoPipelineManager {
         // For each effect in the chain
         for i in 0..self.effect_manager.len() {
             let effect = &self.effect_manager.effects[i].effect;
-            let bind_group = effect.get_bind_group().expect("Bind group should exist");
+            let bind_group = match effect.get_bind_group() {
+                Some(bg) => bg,
+                None => {
+                    error!("Missing bind group for effect {} ({})", i, effect.name);
+                    return;
+                }
+            };
 
             // Calculate input and output texture indices
             let input_index = if i == 0 {
@@ -550,7 +609,7 @@ impl VideoPipelineManager {
                 &views[i] // Effect i writes to texture i
             };
 
-            println!(
+            debug!(
                 "Effect {} ({}): Reading from texture {}, writing to {}",
                 i,
                 effect.name,
@@ -558,15 +617,18 @@ impl VideoPipelineManager {
                 if i == self.effect_manager.len() - 1 {
                     "screen".to_string()
                 } else {
-                    i.to_string()
+                    format!("texture {}", i)
                 }
             );
 
             // Get the texture for this effect
-            let input_texture = self
-                .texture_manager
-                .get_texture(input_index)
-                .expect(&format!("Texture {} should exist", input_index));
+            let input_texture = match self.texture_manager.get_texture(input_index) {
+                Some(texture) => texture,
+                None => {
+                    error!("Missing input texture {} for effect {}", input_index, i);
+                    return;
+                }
+            };
 
             // When rendering to an intermediate texture
             if i < self.effect_manager.len() - 1 {
@@ -606,6 +668,7 @@ impl VideoPipelineManager {
         }
     }
 
+    /// Add a new effect to the pipeline or update existing effects
     pub fn add_effect(
         &mut self,
         update: bool,
@@ -614,7 +677,7 @@ impl VideoPipelineManager {
         shader_effect: ShaderEffect,
         mut shader_effect_type: Box<dyn Effect + Send + Sync>,
     ) -> anyhow::Result<()> {
-        println!("Effect Addition Diagnostics:");
+        debug!("Adding/updating effect: {}", shader_effect.name);
 
         if update {
             // Only update existing effects, don't add new ones
@@ -633,32 +696,36 @@ impl VideoPipelineManager {
                 .add_effect(shader_effect_mut, shader_effect_type);
         }
 
-        println!("Final state:");
-        println!("  Effects count: {}", self.effect_manager.len());
-        println!("  Intermediate textures: {}", self.texture_manager.len());
+        debug!(
+            "Current state: {} effects, {} textures",
+            self.effect_manager.len(),
+            self.texture_manager.len()
+        );
 
         Ok(())
     }
+
+    /// Update all existing effects with current textures
     fn update_existing_effects(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> anyhow::Result<()> {
         let effect_count = self.effect_manager.effects.len();
-        println!("Updating {} existing effects", effect_count);
+        debug!("Updating {} existing effects", effect_count);
 
         // First, we'll store all the Arc<Texture> objects we need to keep alive
         let mut arc_textures = Vec::new();
 
         for i in 0..effect_count {
-            println!(
+            debug!(
                 "Updating effect #{} ({})",
                 i, self.effect_manager.effects[i].effect.name
             );
 
             // Get input texture and view
             let input_index = if i == 0 { 0 } else { i - 1 };
-            println!("  Using input index: {}", input_index);
+            trace!("Using input index: {}", input_index);
 
             // For the YUV to RGB effect (first effect), we need to handle video textures
             let (texture_views, textures) = if i == 0 && !self.videos.is_empty() {
@@ -677,30 +744,31 @@ impl VideoPipelineManager {
                 // Handle intermediate textures (stored as Arc)
                 let input_texture = match self.texture_manager.get_texture(input_index) {
                     Some(texture) => {
-                        println!(
-                            "  Found input texture with format: {:?}, size: {:?}",
+                        trace!(
+                            "Found input texture: format={:?}, size={}x{}",
                             texture.format(),
-                            texture.size()
+                            texture.size().width,
+                            texture.size().height
                         );
                         // Store the Arc to keep it alive
                         arc_textures.push(texture.clone());
                         arc_textures.last().unwrap()
                     }
                     None => {
-                        println!("  ERROR: No input texture at index {}", input_index);
+                        error!("No input texture available at index {}", input_index);
                         return Err(anyhow::anyhow!("No input texture at index {}", input_index));
                     }
                 };
 
                 let input_view = input_texture.create_view(&Default::default());
-                println!("  Successfully created input view");
+                trace!("Created input view successfully");
 
                 // Get a reference to the texture inside the Arc
                 (vec![input_view], vec![input_texture.as_ref()])
             };
 
-            println!(
-                "  Calling update_for_frame for '{}' effect with {} texture views",
+            trace!(
+                "Updating effect '{}' with {} texture views",
                 self.effect_manager.effects[i].effect.name,
                 texture_views.len()
             );
@@ -712,17 +780,18 @@ impl VideoPipelineManager {
                 &texture_views,
                 &textures,
             ) {
-                Ok(_) => println!("  Successfully updated effect bind group"),
+                Ok(_) => trace!("Updated effect bind group successfully"),
                 Err(e) => {
-                    println!("  ERROR updating effect bind group: {:?}", e);
+                    error!("Failed to update effect bind group: {}", e);
                     return Err(e);
                 }
             }
         }
 
-        println!("Successfully updated all existing effects");
+        debug!("Successfully updated all existing effects");
         Ok(())
     }
+    /// Initialize a new effect with appropriate textures and bind groups
     fn initialize_effect(
         &mut self,
         device: &wgpu::Device,
@@ -731,47 +800,51 @@ impl VideoPipelineManager {
         shader_effect_type: &mut dyn Effect,
     ) -> anyhow::Result<()> {
         let effect_count = self.effect_manager.effects.len();
-        println!(
-            "Initializing new effect (current effect count: {})",
-            effect_count
+        debug!(
+            "Initializing new effect '{}' (current count: {})",
+            shader_effect.name, effect_count
         );
-        println!("  Effect name: {}", shader_effect.name);
 
-        // Get source textures and format
+        // Get source textures and format based on position in the effect chain
         let (input_views, input_format, texture_size) = if effect_count == 0 {
-            println!("  First effect - getting textures from video");
+            // First effect uses video textures as input
+            debug!("First effect - using video textures as input");
             let result = self.get_video_textures()?;
-            println!(
-                "  Got {} video texture views with format {:?}, size {:?}",
+            trace!(
+                "Got {} video texture views: format={:?}, size={}x{}",
                 result.0.len(),
                 result.1,
-                result.2
+                result.2.width,
+                result.2.height
             );
             result
         } else {
-            println!("  Subsequent effect - getting textures from previous effect");
+            // Subsequent effects use the output from previous effect
+            debug!("Subsequent effect - using previous effect output as input");
             let result = self.get_previous_effect_texture(effect_count - 1)?;
-            println!(
-                "  Got {} previous effect texture views with format {:?}, size {:?}",
+            trace!(
+                "Got {} texture views from previous effect: format={:?}, size={}x{}",
                 result.0.len(),
                 result.1,
-                result.2
+                result.2.width,
+                result.2.height
             );
             result
         };
 
-        // Check if format conversion is needed
+        // Check if format conversion is needed between effects
         let required_format = shader_effect.get_format().to_owned();
-        println!(
-            "  Effect requires format: {:?}, input format is: {:?}",
+        debug!(
+            "Effect requires format: {:?}, input format is: {:?}",
             required_format, input_format
         );
 
         if input_format != required_format {
-            println!(
-                "  Format conversion needed from {:?} to {:?}",
+            debug!(
+                "Format conversion needed: {:?} -> {:?}",
                 input_format, required_format
             );
+
             // Add format conversion effect if needed
             self.add_format_conversion(
                 device,
@@ -782,13 +855,13 @@ impl VideoPipelineManager {
                 texture_size,
                 effect_count,
             )?;
-            println!("  Format conversion effect added successfully");
+            debug!("Format conversion effect added successfully");
         } else {
-            println!("  No format conversion needed");
+            debug!("No format conversion needed");
         }
 
         // Resize textures for the new effect
-        println!("  Resizing intermediate textures for new effect");
+        debug!("Resizing intermediate textures for new effect");
         self.texture_manager.resize_intermediate_textures(
             device,
             texture_size,
@@ -798,99 +871,118 @@ impl VideoPipelineManager {
         // Get the input for the current effect (which might be after conversion)
         let input_index = if input_format != required_format {
             // If we added a conversion effect, use its output
-            println!("  Using conversion effect output at index {}", effect_count);
+            debug!("Using conversion effect output at index {}", effect_count);
             effect_count
         } else {
             // Otherwise use the previous texture
             let idx = effect_count.saturating_sub(1);
-            println!("  Using previous texture at index {}", idx);
+            debug!("Using previous texture at index {}", idx);
             idx
         };
 
-        // Update this effect's bind group
-        println!("  Getting input texture at index {}", input_index);
+        // Get the input texture for this effect
+        trace!("Getting input texture at index {}", input_index);
         let input_texture = self
             .texture_manager
             .get_texture(input_index)
             .ok_or_else(|| {
-                println!("  ERROR: No input texture found at index {}", input_index);
+                error!("No input texture found at index {}", input_index);
                 anyhow::anyhow!("No input texture at index {}", input_index)
             })?;
-        println!(
-            "  Found input texture with format {:?}, size {:?}",
+
+        trace!(
+            "Using input texture: format={:?}, size={}x{}",
             input_texture.format(),
-            input_texture.size()
+            input_texture.size().width,
+            input_texture.size().height
         );
 
-        println!("  Getting input texture view at index {}", input_index);
+        // Get the corresponding texture view
+        trace!("Getting input texture view");
         let input_view = self
             .texture_manager
             .get_texture_view(input_index)
             .ok_or_else(|| {
-                println!("  ERROR: No input view found at index {}", input_index);
+                error!("No input view found at index {}", input_index);
                 anyhow::anyhow!("No input view at index {}", input_index)
             })?;
-        println!("  Got input texture view successfully");
+        trace!("Input texture view created successfully");
 
-        // Create texture lists
+        // Create texture lists for the effect
         let texture_views = vec![input_view];
         let textures = vec![input_texture.as_ref()];
-        println!(
-            "  Created texture lists with {} views and {} textures",
+        trace!(
+            "Created texture lists with {} views and {} textures",
             texture_views.len(),
             textures.len()
         );
 
-        // Update the shader effect's bind group
-        println!("  Calling update_for_frame on shader effect");
+        // Update the shader effect's bind group with these textures
+        debug!("Updating effect bind group with textures");
         match shader_effect_type.update_for_frame(device, shader_effect, &texture_views, &textures)
         {
-            Ok(_) => println!("  Successfully updated shader effect bind group"),
+            Ok(_) => debug!("Successfully updated shader effect bind group"),
             Err(e) => {
-                println!("  ERROR updating shader effect bind group: {:?}", e);
+                error!("Failed to update shader effect bind group: {}", e);
                 return Err(e);
             }
         }
 
-        println!("  Effect initialization completed successfully");
+        debug!("Effect initialization completed successfully");
         Ok(())
     }
+
+    /// Get textures from the current video for use in effects
     fn get_video_textures(
         &self,
     ) -> anyhow::Result<(Vec<TextureView>, TextureFormat, wgpu::Extent3d)> {
+        // Get the first available video
         let video = self
             .videos
             .values()
             .next()
             .ok_or_else(|| anyhow::anyhow!("No video available"))?;
 
+        // Extract size from Y plane texture
         let size = wgpu::Extent3d {
             width: video.texture_y.size().width,
             height: video.texture_y.size().height,
             depth_or_array_layers: 1,
         };
 
+        // Get format and create views
         let format = video.texture_y.format();
         let y_view = video.texture_y.create_view(&Default::default());
         let uv_view = video.texture_uv.create_view(&Default::default());
 
+        trace!(
+            "Retrieved video textures: format={:?}, size={}x{}",
+            format,
+            size.width,
+            size.height
+        );
+
         Ok((vec![y_view, uv_view], format, size))
     }
 
+    /// Get texture from a previous effect's output
     fn get_previous_effect_texture(
         &self,
         index: usize,
     ) -> anyhow::Result<(Vec<TextureView>, TextureFormat, wgpu::Extent3d)> {
+        // Get the texture from the manager
         let texture = self
             .texture_manager
             .get_texture(index)
             .ok_or_else(|| anyhow::anyhow!("No texture at index {}", index))?;
 
+        // Get the corresponding view
         let view = self
             .texture_manager
             .get_texture_view(index)
             .ok_or_else(|| anyhow::anyhow!("No texture view at index {}", index))?;
 
+        // Extract size and format
         let size = wgpu::Extent3d {
             width: texture.size().width,
             height: texture.size().height,
@@ -899,8 +991,18 @@ impl VideoPipelineManager {
 
         let format = texture.format();
 
+        trace!(
+            "Retrieved previous effect texture at index {}: format={:?}, size={}x{}",
+            index,
+            format,
+            size.width,
+            size.height
+        );
+
         Ok((vec![view], format, size))
     }
+
+    /// Add a format conversion effect between incompatible effect formats
     fn add_format_conversion(
         &mut self,
         device: &wgpu::Device,
@@ -911,55 +1013,59 @@ impl VideoPipelineManager {
         texture_size: wgpu::Extent3d,
         output_index: usize,
     ) -> anyhow::Result<()> {
-        println!(
-            "Adding format conversion from {:?} to {:?}",
+        info!(
+            "Adding format conversion: {:?} → {:?}",
             input_format, required_format
         );
-        println!("  Received {} input views", input_views.len());
-        println!("  Output index: {}", output_index);
-        println!("  Texture size: {:?}", texture_size);
+        trace!(
+            "Format conversion details: input_views={}, output_index={}, size={}x{}",
+            input_views.len(),
+            output_index,
+            texture_size.width,
+            texture_size.height
+        );
 
+        // Handle supported format conversions
         match (input_format, required_format) {
+            // YUV to RGB conversion (common for video processing)
             (wgpu::TextureFormat::R8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb) => {
-                println!("  Creating YUV to RGB converter");
+                debug!("Creating YUV to RGB converter");
+
+                // Create the YUV to RGB effect
                 let mut yuv_effect = YuvToRgbEffect::new(0, wgpu::TextureFormat::Bgra8UnormSrgb);
                 let mut yuv_shader = yuv_effect.add(device, queue);
-                println!(
-                    "  Created YUV shader effect with layout ID: {:?}",
+                debug!(
+                    "Created YUV shader effect with bind group layout ID: {:?}",
                     yuv_shader.bind_group_layout.global_id()
                 );
 
-                // Ensure we have enough textures
-                println!("  Resizing intermediate textures for conversion");
+                // Ensure we have enough textures for this conversion
+                debug!("Preparing intermediate textures for format conversion");
                 self.texture_manager.resize_intermediate_textures(
                     device,
                     texture_size,
                     output_index + 1,
                 );
 
-                // Create bind group
-                println!("  Getting output texture at index {}", output_index);
+                // Get the output texture for the conversion effect
+                debug!("Getting output texture at index {}", output_index);
                 let output_texture =
                     self.texture_manager
                         .get_texture(output_index)
                         .ok_or_else(|| {
-                            println!(
-                                "  ERROR: Failed to get output texture at index {}",
-                                output_index
-                            );
+                            error!("Failed to get output texture at index {}", output_index);
                             anyhow::anyhow!("Failed to get output texture")
                         })?;
-                println!(
-                    "  Found output texture with format {:?}, size {:?}",
+
+                trace!(
+                    "Output texture: format={:?}, size={}x{}",
                     output_texture.format(),
-                    output_texture.size()
+                    output_texture.size().width,
+                    output_texture.size().height
                 );
 
-                println!("  Creating bind group for YUV to RGB effect");
-                println!(
-                    "  Using {} input views and 1 output texture",
-                    input_views.len()
-                );
+                // Create bind group connecting input and output textures
+                debug!("Creating bind group for YUV to RGB effect");
                 let bind_group = match yuv_effect.create_bind_group(
                     device,
                     &yuv_shader,
@@ -967,28 +1073,32 @@ impl VideoPipelineManager {
                     &vec![output_texture.as_ref()],
                 ) {
                     Ok(bg) => {
-                        println!("  Successfully created bind group");
+                        debug!("Successfully created bind group");
                         bg
                     }
                     Err(e) => {
-                        println!("  ERROR creating bind group: {:?}", e);
+                        error!("Failed to create bind group: {}", e);
                         return Err(e);
                     }
                 };
 
-                println!("  Updating YUV shader bind group");
+                // Update the effect with the bind group
                 yuv_shader.update_bind_group(bind_group);
 
-                // Add to manager
-                println!("  Adding YUV to RGB effect to manager");
+                // Add the conversion effect to the manager
+                debug!("Adding YUV to RGB effect to pipeline");
                 self.effect_manager
                     .add_effect(yuv_shader, Box::new(yuv_effect));
-                println!("  YUV to RGB conversion effect added successfully");
 
+                info!("YUV to RGB conversion effect added successfully");
                 Ok(())
             }
+            // Add other format conversions here as needed
             _ => {
-                println!("  ERROR: Unsupported format conversion");
+                error!(
+                    "Unsupported format conversion: {:?} to {:?}",
+                    input_format, required_format
+                );
                 Err(anyhow::anyhow!(
                     "Unsupported format conversion: {:?} to {:?}",
                     input_format,
