@@ -185,23 +185,9 @@ fn apply_upscale(color: vec4<f32>, tex_coords: vec2<f32>) -> vec4<f32> {
 
 @fragment
 fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
+    // return vec4<f32>(tex_coords.x, tex_coords.y, 0.0, 1.0); // This shows without padding
+//    let fixed_coords =  vec4<f32>(tex_coords.x, tex_coords.y, 0.0, 1.0); // This shows without padding
     let color = textureSample(input_texture, s_sampler, tex_coords);
-    
-    // Debug visualization
-    if uniforms.comparison_enabled == 1u {
-        // Add a visible split line
-        let split_width = 0.002; // Make it wider for visibility
-        if abs(tex_coords.x - uniforms.comparison_position) < split_width {
-            return vec4<f32>(1.0, 0.0, 0.0, 1.0); // Bright red line
-        }
-        
-        // Tint the sides slightly to see the split
-        if tex_coords.x > uniforms.comparison_position {
-            return color * vec4<f32>(1.0, 0.9, 0.9, 1.0); 
-        } else {
-            return apply_upscale(color, tex_coords) * vec4<f32>(0.9, 1.0, 0.9, 1.0); 
-        }
-    }
     
     return apply_upscale(color, tex_coords);
 }

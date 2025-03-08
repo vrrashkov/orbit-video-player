@@ -17,6 +17,11 @@ use std::{
 
 use iced::widget::{Button, Column, Container, Row, Slider, Text};
 
+use super::icons::{comparison, pause, play};
+use super::theme::{
+    controls_container, primary_button, secondary_button, text_time, video_container, video_slider,
+    TEXT_LIGHT,
+};
 use super::{compariosn_slider::comparison_slider_style, Video};
 
 pub struct Player {
@@ -115,27 +120,10 @@ impl Player {
 
     pub fn view(&self) -> Element<Event> {
         let is_playing = self.stream.borrow().is_playing;
-        let total_frames = self.stream.borrow().total_frames().unwrap();
         let is_looping = self.stream.borrow().looping();
         let current = self.stream.borrow().current_time();
         let total = self.stream.borrow().total_time().unwrap();
-        // let video_row = {
-        //     let mut row = Stack::new().push(
-        //         Container::new("Test22222")
-        //             .width(iced::Length::Fill)
-        //             .height(iced::Length::Fill),
-        //     );
 
-        //     if self.comparison_enabled {
-        //         row = row.push(
-        //             Container::new("Test On Top")
-        //                 .width(iced::Length::Fixed(40.0))
-        //                 .height(iced::Length::Fill),
-        //         );
-        //     }
-
-        //     row
-        // };
         let video_row = {
             let mut row = Stack::new().push(
                 Container::new(
@@ -154,7 +142,8 @@ impl Player {
                         .on_new_frame(Event::NewFrame),
                 )
                 .width(iced::Length::Fill)
-                .height(iced::Length::Fill),
+                .height(iced::Length::Fill)
+                .style(video_container),
             );
 
             if self.comparison_enabled {
@@ -175,60 +164,78 @@ impl Player {
 
             row
         };
+
         Column::new()
             .push(
                 Container::new(column![video_row])
                     .width(iced::Length::Fill)
-                    .height(iced::Length::Fill),
+                    .height(iced::Length::Fill)
+                    .style(video_container),
             )
             .push(
                 Container::new(
                     Slider::new(0.0..=total.as_secs_f64(), self.position, Event::Seek)
                         .step(0.001)
-                        .on_release(Event::SeekRelease),
+                        .on_release(Event::SeekRelease)
+                        .style(video_slider),
                 )
-                .padding(iced::Padding::new(5.0).left(10.0).right(10.0)),
+                .padding(iced::Padding::new(15.0).left(15.0).right(15.0))
+                .style(controls_container),
             )
             .push(
-                Button::new(Text::new(if self.comparison_enabled {
-                    "Disable Comparison"
-                } else {
-                    "Enable Comparison"
-                }))
-                .width(120.0)
-                .on_press(Event::ToggleComparison),
+                Container::new(
+                    Row::new()
+                        .spacing(10)
+                        .align_y(iced::alignment::Vertical::Center)
+                        .padding(iced::Padding::new(10.0))
+                        .push(
+                            Button::new(
+                                Row::new()
+                                    .spacing(5)
+                                    .align_y(iced::alignment::Alignment::Center)
+                                    .push(if !is_playing {
+                                        play(16.0, None)
+                                    } else {
+                                        pause(16.0, None)
+                                    })
+                                    .push(Text::new(if !is_playing { "Play" } else { "Pause" })),
+                            )
+                            .width(100.0)
+                            .on_press(Event::Pause)
+                            .style(primary_button),
+                        )
+                        .push(
+                            Button::new(
+                                Row::new()
+                                    .spacing(5)
+                                    .align_y(iced::alignment::Alignment::Center)
+                                    .push(comparison(16.0, None))
+                                    .push(Text::new(if self.comparison_enabled {
+                                        "Disable Comparison"
+                                    } else {
+                                        "Enable Comparison"
+                                    })),
+                            )
+                            .width(180.0)
+                            .on_press(Event::ToggleComparison)
+                            .style(secondary_button),
+                        )
+                        .push(horizontal_space())
+                        .push(
+                            Text::new(format!(
+                                "{:02}:{:02} / {:02}:{:02}",
+                                (current.as_secs_f64() / 60.0).floor() as u64,
+                                (current.as_secs_f64() % 60.0).floor() as u64,
+                                (total.as_secs_f64() / 60.0).floor() as u64,
+                                (total.as_secs_f64() % 60.0).floor() as u64
+                            ))
+                            .style(text_time),
+                        ),
+                )
+                .style(controls_container)
+                .width(Length::Fill),
             )
-            .push(
-                Row::new()
-                    .spacing(5)
-                    .align_y(iced::alignment::Vertical::Center)
-                    .padding(iced::Padding::new(10.0).top(0.0))
-                    .push(
-                        Button::new(Text::new(if !is_playing { "Play" } else { "Pause" }))
-                            .width(80.0)
-                            .on_press(Event::Pause),
-                    )
-                    .push(
-                        Button::new(Text::new(if is_looping {
-                            "Disable Loop"
-                        } else {
-                            "Enable Loop"
-                        }))
-                        .width(120.0)
-                        .on_press(Event::Loop),
-                    )
-                    .push(
-                        Text::new(format!(
-                            "{:02}:{:02} / {:02}:{:02}",
-                            (current.as_secs_f64() / 60.0).floor() as u64,
-                            (current.as_secs_f64() % 60.0).ceil() as u64, // ceil() for rounding up
-                            (total.as_secs_f64() / 60.0).floor() as u64,
-                            (total.as_secs_f64() % 60.0).ceil() as u64 // ceil() for rounding up
-                        ))
-                        .width(iced::Length::Fill)
-                        .align_x(iced::alignment::Horizontal::Right),
-                    ),
-            )
+            .spacing(1)
             .into()
     }
 }

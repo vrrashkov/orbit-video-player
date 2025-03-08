@@ -55,21 +55,7 @@ impl RenderPasses {
             pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
         }
         println!("Video pass vertices:");
-        let vertices = [
-            (-1.0, -1.0, 0.0, 1.0), // Position, UV
-            (1.0, -1.0, 1.0, 1.0),
-            (-1.0, 1.0, 0.0, 0.0),
-            (-1.0, 1.0, 0.0, 0.0),
-            (1.0, -1.0, 1.0, 1.0),
-            (1.0, 1.0, 1.0, 0.0),
-        ];
 
-        for (i, v) in vertices.iter().enumerate() {
-            println!(
-                "  Vertex {}: pos({}, {}), uv({}, {})",
-                i, v.0, v.1, v.2, v.3
-            );
-        }
         pass.draw(0..6, 0..1);
 
         // video.prepare_index.store(0, Ordering::Relaxed);
@@ -118,19 +104,21 @@ impl RenderPasses {
             occlusion_query_set: None,
         });
 
-        // Simply use the full render target size without any aspect ratio calculations
-        pass.set_viewport(
-            0.0,                  // No x offset
-            0.0,                  // No y offset
-            render_target_width,  // Use full width
-            render_target_height, // Use full height
-            0.0,
-            1.0,
-        );
-
-        // Use clip rectangle for scissor
-        pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
-
+        if clear {
+            pass.set_viewport(0.0, 0.0, texture_width, texture_height, 0.0, 1.0);
+            pass.set_scissor_rect(0, 0, texture_width as u32, texture_height as u32);
+        } else {
+            // For final render to screen, use the clip bounds
+            pass.set_viewport(
+                clip.x as f32,
+                clip.y as f32,
+                clip.width as f32,
+                clip.height as f32,
+                0.0,
+                1.0,
+            );
+            pass.set_scissor_rect(clip.x, clip.y, clip.width, clip.height);
+        }
         println!("Setting pipeline");
         pass.set_pipeline(&effect.pipeline);
 

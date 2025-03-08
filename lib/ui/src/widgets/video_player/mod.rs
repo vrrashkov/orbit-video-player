@@ -4,6 +4,9 @@ use std::{cell::RefCell, marker::PhantomData};
 
 pub mod compariosn_slider;
 pub mod element;
+pub mod icons;
+pub mod theme;
+
 pub struct Video<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
     Renderer: PrimitiveRenderer,

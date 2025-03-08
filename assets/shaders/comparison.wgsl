@@ -37,13 +37,31 @@ fn vs_main(@builtin(vertex_index) vertex_idx: u32) -> VertexOutput {
     output.uv = uvs[vertex_idx];
     return output;
 }
-
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    // Use the UVs for texture sampling
-    if (in.uv.x < uniforms.line_position) {
-        return textureSample(original_texture, texture_sampler, in.uv);
+    // Calculate how close we are to the dividing line
+    let line_distance = abs(in.uv.x - uniforms.line_position);
+    
+    // Sample the appropriate texture using ternary operator style
+    let color = select(
+        textureSample(processed_texture, texture_sampler, in.uv),
+        textureSample(original_texture, texture_sampler, in.uv),
+        in.uv.x < uniforms.line_position
+    );
+    
+    // Create a line effect with a custom color
+    if (line_distance < 0.002) {
+        // Use a blue line color
+        let line_color = vec3<f32>(0.0, 0.5, 1.0); // Sky blue
+        
+        // Blend the line color with the original content (75% line, 25% original)
+        return vec4<f32>(
+            line_color.r * 0.75 + color.r * 0.25,
+            line_color.g * 0.75 + color.g * 0.25,
+            line_color.b * 0.75 + color.b * 0.25,
+            color.a
+        );
     } else {
-        return textureSample(processed_texture, texture_sampler, in.uv);
+        return color;
     }
 }

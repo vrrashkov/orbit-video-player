@@ -356,8 +356,11 @@ impl VideoPipeline {
                 bytemuck::cast_slice(&[uniforms]),
             );
 
-            video.prepare_index.fetch_add(1, Ordering::Relaxed);
+            // video.prepare_index.fetch_add(1, Ordering::Relaxed);
             // video.render_index.store(0, Ordering::Relaxed);
+
+            let next_index = (prepare_index + 1) % 256;
+            video.prepare_index.store(next_index, Ordering::Relaxed);
         }
     }
 }

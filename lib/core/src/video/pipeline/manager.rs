@@ -138,8 +138,12 @@ impl VideoPipelineManager {
 
         // Update the effect pass by passing the adjusted values to the RenderPasses function
         println!(
-            "Setting stretched viewport with x: {}, y: {}, width: {}, height: {}",
-            clip.x as f32, clip.y as f32, corrected_width, corrected_height
+            "Setting stretched viewport with x: {}, y: {}, texture_width: {}, texture_height: {}",
+            clip.x as f32, clip.y as f32, texture_width, texture_height
+        );
+        println!(
+            "Setting stretched viewport with x: {}, y: {}, render_target_width: {}, render_target_height: {}",
+            clip.x as f32, clip.y as f32, render_target_width, render_target_height
         );
         RenderPasses::apply_effect(
             effect,
@@ -439,6 +443,30 @@ impl VideoPipelineManager {
         println!("\nStarting draw method for frame {}", video_id);
         self.debug_effect_chain();
 
+        // Add debug logs here
+        println!("\nSize Debug Information:");
+        println!("UI clip bounds: {}x{}", clip.width, clip.height);
+
+        if let Some(video) = self.videos.get(&video_id) {
+            println!(
+                "Video source size: {}x{}",
+                video.texture_y.size().width,
+                video.texture_y.size().height
+            );
+
+            // Log all intermediate texture sizes
+            for i in 0..self.texture_manager.len() {
+                if let Some(texture) = self.texture_manager.get_texture(i) {
+                    println!(
+                        "Intermediate texture {}: {}x{}",
+                        i,
+                        texture.size().width,
+                        texture.size().height
+                    );
+                }
+            }
+        }
+
         if let Some(video) = self.videos.get(&video_id) {
             // For each effect in the chain, ensure the video textures are properly bound
             if !self.effect_manager.is_empty() {
@@ -450,6 +478,9 @@ impl VideoPipelineManager {
                 let render_target_width = clip.width as f32;
                 let render_target_height = clip.height as f32;
 
+                println!("clip {:?}", &clip);
+                println!("render_target_width {}", &render_target_width);
+                println!("render_target_height {}", &render_target_height);
                 // Process the effect chain with the current frame's textures
                 self.process_effect_chain(
                     encoder,
@@ -537,20 +568,41 @@ impl VideoPipelineManager {
                 .get_texture(input_index)
                 .expect(&format!("Texture {} should exist", input_index));
 
-            // Apply the effect
-            self.apply_effect(
-                encoder,
-                effect,
-                bind_group,
-                output_view,
-                input_texture.as_ref(),
-                clip,
-                i < self.effect_manager.len() - 1, // Clear only intermediate textures
-                render_target_width,
-                render_target_height,
-                texture_width,
-                texture_height,
-            );
+            // When rendering to an intermediate texture
+            if i < self.effect_manager.len() - 1 {
+                // Use the intermediate texture dimensions
+                let intermediate_width = input_texture.size().width as f32;
+                let intermediate_height = input_texture.size().height as f32;
+
+                self.apply_effect(
+                    encoder,
+                    effect,
+                    bind_group,
+                    output_view,
+                    input_texture.as_ref(),
+                    clip,
+                    true, // clear = true for intermediate
+                    intermediate_width,
+                    intermediate_height,
+                    intermediate_width,
+                    intermediate_height,
+                );
+            } else {
+                // For the final render to the UI, use the clip dimensions
+                self.apply_effect(
+                    encoder,
+                    effect,
+                    bind_group,
+                    output_view,
+                    input_texture.as_ref(),
+                    clip,
+                    false, // clear = false for final
+                    clip.width as f32,
+                    clip.height as f32,
+                    input_texture.size().width as f32,
+                    input_texture.size().height as f32,
+                );
+            }
         }
     }
 
