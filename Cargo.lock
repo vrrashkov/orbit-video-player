@@ -2360,64 +2360,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nebula"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "env_logger",
- "ffmpeg-next",
- "iced",
- "indexmap",
- "nebula-common",
- "nebula-core",
- "nebula-ui",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "winit 0.29.15",
-]
-
-[[package]]
-name = "nebula-common"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ffmpeg-next",
- "iced",
- "thiserror 2.0.9",
- "wgpu 23.0.1",
-]
-
-[[package]]
-name = "nebula-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bon",
- "bytemuck",
- "ffmpeg-next",
- "iced",
- "iced_wgpu",
- "indexmap",
- "nebula-common",
- "tracing",
- "wgpu 23.0.1",
- "winit 0.29.15",
-]
-
-[[package]]
-name = "nebula-ui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "iced",
- "iced_wgpu",
- "nebula-core",
- "tracing",
- "winit 0.29.15",
-]
-
-[[package]]
 name = "nix"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2750,6 +2692,64 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba0b26cec2e24f08ed8bb31519a9333140a6599b867dac464bb150bdb796fd43"
 dependencies = [
  "libredox",
+]
+
+[[package]]
+name = "orbit-video-player"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "ffmpeg-next",
+ "iced",
+ "indexmap",
+ "orbit-video-player-common",
+ "orbit-video-player-core",
+ "orbit-video-player-ui",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "winit 0.29.15",
+]
+
+[[package]]
+name = "orbit-video-player-common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ffmpeg-next",
+ "iced",
+ "thiserror 2.0.9",
+ "wgpu 23.0.1",
+]
+
+[[package]]
+name = "orbit-video-player-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bon",
+ "bytemuck",
+ "ffmpeg-next",
+ "iced",
+ "iced_wgpu",
+ "indexmap",
+ "orbit-video-player-common",
+ "tracing",
+ "wgpu 23.0.1",
+ "winit 0.29.15",
+]
+
+[[package]]
+name = "orbit-video-player-ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "iced",
+ "iced_wgpu",
+ "orbit-video-player-core",
+ "tracing",
+ "winit 0.29.15",
 ]
 
 [[package]]

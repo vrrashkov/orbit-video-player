@@ -1,5 +1,5 @@
 [package]
-name = "nebula"
+name = "orbit-video-player"
 version = "0.1.0"
 edition = "2021"
 
@@ -17,9 +17,9 @@ tracing-subscriber.workspace = true
 env_logger.workspace = true 
 indexmap.workspace = true
 # LOCAL
-nebula-common.workspace = true
-nebula-ui.workspace = true
-nebula-core.workspace = true
+orbit-video-player-common.workspace = true
+orbit-video-player-ui.workspace = true
+orbit-video-player-core.workspace = true
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -37,7 +37,7 @@ thiserror = "2.0.9"
 tokio = { version = "1", features = ["full"] }
 bon = "3.3.2"
 # LOCAL
-nebula-common = { path = "lib/common" }
-nebula-core = { path = "lib/core" }
-nebula-ui = { path = "lib/ui" }
+orbit-video-player-common = { path = "lib/common" }
+orbit-video-player-core = { path = "lib/core" }
+orbit-video-player-ui = { path = "lib/ui" }
 indexmap = "2.0"

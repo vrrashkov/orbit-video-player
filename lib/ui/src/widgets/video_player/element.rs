@@ -6,7 +6,7 @@ use iced::{
     Element, Length,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
-use nebula_core::video::{primitive::VideoPrimitive, stream::VideoStream};
+use orbit_video_player_core::video::{primitive::VideoPrimitive, stream::VideoStream};
 use std::collections::HashMap;
 use std::{
     cell::RefCell,

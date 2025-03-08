@@ -185,8 +185,6 @@ fn apply_upscale(color: vec4<f32>, tex_coords: vec2<f32>) -> vec4<f32> {
 
 @fragment
 fn fs_main(@location(0) tex_coords: vec2<f32>) -> @location(0) vec4<f32> {
-    // return vec4<f32>(tex_coords.x, tex_coords.y, 0.0, 1.0); // This shows without padding
-//    let fixed_coords =  vec4<f32>(tex_coords.x, tex_coords.y, 0.0, 1.0); // This shows without padding
     let color = textureSample(input_texture, s_sampler, tex_coords);
     
     return apply_upscale(color, tex_coords);

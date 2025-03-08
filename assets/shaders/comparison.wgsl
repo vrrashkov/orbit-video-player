@@ -53,7 +53,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if (line_distance < 0.002) {
         // Dark line color with opacity
         let line_color = vec3<f32>(0.1, 0.1, 0.1); // Almost black
-        let opacity = 0.9; // 70% opacity
+        let opacity = 0.9;
         
         // Blend the line color with the original content
         return vec4<f32>(

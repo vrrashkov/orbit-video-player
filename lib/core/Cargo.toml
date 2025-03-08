@@ -1,5 +1,5 @@
 [package]
-name = "nebula-core"
+name = "orbit-video-player-core"
 version = "0.1.0"
 edition = "2021"
 
@@ -15,4 +15,4 @@ bon.workspace = true
 bytemuck.workspace = true
 indexmap.workspace = true
 # Local
-nebula-common.workspace = true
+orbit-video-player-common.workspace = true

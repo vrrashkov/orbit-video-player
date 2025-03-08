@@ -1,6 +1,6 @@
 use iced::{widget::Container, Element};
-use nebula_core::video::stream::{VideoStream, VideoStreamOptions};
-use nebula_ui::widgets::video_player::element::Player;
+use orbit_video_player_core::video::stream::{VideoStream, VideoStreamOptions};
+use orbit_video_player_ui::widgets::video_player::element::Player;
 use std::cell::RefCell;
 use std::path::Path;
 use tracing::Level;
@@ -22,12 +22,12 @@ pub struct App {
 }
 #[derive(Clone, Debug)]
 pub enum Message {
-    VideoPlayer(nebula_ui::widgets::video_player::element::Event),
+    VideoPlayer(orbit_video_player_ui::widgets::video_player::element::Event),
 }
 
 impl Default for App {
     fn default() -> Self {
-        let video_path = "assets/videos/video1.mp4";
+        let video_path = "assets/videos/test2_resolution.mp4";
         if !Path::new(video_path).exists() {
             panic!("Video file not found at: {}", video_path);
         }

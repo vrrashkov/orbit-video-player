@@ -1,5 +1,5 @@
 [package]
-name = "nebula-ui"
+name = "orbit-video-player-ui"
 version = "0.1.0"
 edition = "2021"
 
@@ -10,4 +10,4 @@ iced_wgpu.workspace = true
 tracing.workspace = true
 winit.workspace = true
 # LOCAL
-nebula-core.workspace = true
+orbit-video-player-core.workspace = true

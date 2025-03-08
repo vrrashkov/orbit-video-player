@@ -1,5 +1,5 @@
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
-use nebula_core::video::stream::VideoStream;
+use orbit_video_player_core::video::stream::VideoStream;
 use std::{cell::RefCell, collections::HashMap, marker::PhantomData};
 
 pub mod compariosn_slider;

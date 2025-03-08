@@ -8,7 +8,7 @@ use ffmpeg_next::{
     },
 };
 
-use nebula_common::VideoError;
+use orbit_video_player_common::VideoError;
 use std::{
     borrow::Borrow,
     collections::VecDeque,
