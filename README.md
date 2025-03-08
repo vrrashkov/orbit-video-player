@@ -4,7 +4,7 @@ A fun video player project with real-time shader effects processing built with R
 
 ## Overview
 
-Orbit Video Player is a hobby project that allows you to apply and stack custom GLSL shader effects to videos in real-time. The application processes effects in a linear pipeline, where each shader takes the output of the previous shader (or the original video) as its input. This personal learning project explores graphics programming without requiring external libraries or complex setup.
+Orbit Video Player is a hobby project that allows you to apply and stack custom WGSL shader effects to videos in real-time. The application processes effects in a linear pipeline, where each shader takes the output of the previous shader (or the original video) as its input. This personal learning project explores graphics programming without requiring external libraries or complex setup.
 
 **Key Features:**
 
