@@ -12,7 +12,7 @@ Orbit Video Player is a hobby project that allows you to apply and stack custom 
 - Linear shader stacking with customizable ordering
 - Side-by-side comparison between original and processed video
 - Native performance using WGPU for GPU acceleration
-- Clean, responsive UI built with iced
+- Clean UI built with iced
 - FFmpeg integration for video processing
 
 ## Preview
