@@ -1,5 +1,4 @@
-use iced::widget::{button, container, slider, text, Button, Column, Container, Row, Slider, Text};
-use iced::Length;
+use iced::widget::{button, container, slider, text};
 use iced::{Border, Color, Shadow, Theme};
 
 // Define custom colors - black and yellow bee theme
@@ -27,7 +26,7 @@ pub fn text_time(_theme: &Theme) -> text::Style {
         color: Some(Color::from_rgb(0.7, 0.7, 0.7)),
     }
 }
-pub fn primary_button<'a>(_theme: &Theme, status: button::Status) -> button::Style {
+pub fn primary_button(_theme: &Theme, status: button::Status) -> button::Style {
     match status {
         button::Status::Active => button::Style {
             background: Some(ACCENT_YELLOW.into()),
@@ -108,7 +107,7 @@ pub fn primary_button<'a>(_theme: &Theme, status: button::Status) -> button::Sty
     }
 }
 
-pub fn secondary_button<'a>(_theme: &Theme, status: button::Status) -> button::Style {
+pub fn secondary_button(_theme: &Theme, status: button::Status) -> button::Style {
     match status {
         button::Status::Active => button::Style {
             background: Some(SURFACE.into()),
@@ -193,7 +192,7 @@ pub fn secondary_button<'a>(_theme: &Theme, status: button::Status) -> button::S
 }
 
 // Slider styles - using the proper Rail and Handle structure
-pub fn video_slider<'a>(_theme: &Theme, status: slider::Status) -> slider::Style {
+pub fn video_slider(_theme: &Theme, _status: slider::Status) -> slider::Style {
     slider::Style {
         rail: slider::Rail {
             backgrounds: (ACCENT_YELLOW.into(), SURFACE.into()),
@@ -213,7 +212,7 @@ pub fn video_slider<'a>(_theme: &Theme, status: slider::Status) -> slider::Style
     }
 }
 
-pub fn comparison_slider_style<'a>(_theme: &Theme, status: slider::Status) -> slider::Style {
+pub fn comparison_slider_style(_theme: &Theme, _status: slider::Status) -> slider::Style {
     slider::Style {
         rail: slider::Rail {
             backgrounds: (
@@ -241,7 +240,7 @@ pub fn comparison_slider_style<'a>(_theme: &Theme, status: slider::Status) -> sl
 }
 
 // Container styles - using the proper Style structure
-pub fn video_container<'a>(_theme: &Theme) -> container::Style {
+pub fn video_container(_theme: &Theme) -> container::Style {
     container::Style {
         text_color: Some(TEXT_LIGHT),
         background: Some(Color::BLACK.into()),
@@ -261,7 +260,7 @@ pub fn video_container<'a>(_theme: &Theme) -> container::Style {
     }
 }
 
-pub fn controls_container<'a>(_theme: &Theme) -> container::Style {
+pub fn controls_container(_theme: &Theme) -> container::Style {
     container::Style {
         text_color: Some(TEXT_LIGHT),
         background: Some(BACKGROUND.into()),

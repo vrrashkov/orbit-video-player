@@ -1,10 +1,7 @@
-use iced::widget::{
-    button, center, checkbox, column, container, horizontal_rule, horizontal_space, pick_list, row,
-    scrollable, stack, text, vertical_rule,
-};
+use iced::widget::{column, horizontal_space};
 use iced::{
     advanced::{self, graphics::core::event::Status, layout, widget, Widget},
-    widget::{slider::Style, Space, Stack},
+    widget::Stack,
     Alignment::Center,
     Element, Length,
 };
@@ -20,7 +17,6 @@ use iced::widget::{Button, Column, Container, Row, Slider, Text};
 use super::icons::{comparison, pause, play};
 use super::theme::{
     controls_container, primary_button, secondary_button, text_time, video_container, video_slider,
-    TEXT_LIGHT,
 };
 use super::{compariosn_slider::comparison_slider_style, Video};
 
@@ -120,7 +116,7 @@ impl Player {
 
     pub fn view(&self) -> Element<Event> {
         let is_playing = self.stream.borrow().is_playing;
-        let is_looping = self.stream.borrow().looping();
+        let _is_looping = self.stream.borrow().looping();
         let current = self.stream.borrow().current_time();
         let total = self.stream.borrow().total_time().unwrap();
 
@@ -416,7 +412,7 @@ where
                     }
                     iced::mouse::Event::CursorMoved { position } => {
                         if self.dragging_comparison {
-                            let new_position =
+                            let _new_position =
                                 ((position.x - bounds.x) / bounds.width).clamp(0.0, 1.0);
 
                             if let Some(ref message) = self.on_comparison_position_change {

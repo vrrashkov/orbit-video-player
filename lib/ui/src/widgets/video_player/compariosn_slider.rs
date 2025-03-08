@@ -1,12 +1,9 @@
 use iced::{
-    widget::{
-        slider::{Handle, HandleShape, Rail, Status, Style},
-        Slider,
-    },
+    widget::slider::{Handle, HandleShape, Rail, Status, Style},
     Theme,
 };
 
-pub fn comparison_slider_style(theme: &Theme, status: Status) -> Style {
+pub fn comparison_slider_style(theme: &Theme, _status: Status) -> Style {
     let palette = theme.extended_palette();
 
     Style {
