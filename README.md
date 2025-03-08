@@ -4,7 +4,7 @@ A fun video player project with real-time shader effects processing built with R
 
 ## Overview
 
-Orbit Video Player is a hobby project that allows you to apply and stack custom GLSL shader effects to videos in real-time. The application processes effects in a linear pipeline, where each shader takes the output of the previous shader (or the original video) as its input. This personal learning project explores graphics programming without requiring external libraries or complex setup.
+Orbit Video Player is a hobby project that allows you to apply and stack custom WGSL shader effects to videos in real-time. The application processes effects in a linear pipeline, where each shader takes the output of the previous shader (or the original video) as its input. This personal learning project explores graphics programming without requiring external libraries or complex setup.
 
 **Key Features:**
 
@@ -12,7 +12,7 @@ Orbit Video Player is a hobby project that allows you to apply and stack custom 
 - Linear shader stacking with customizable ordering
 - Side-by-side comparison between original and processed video
 - Native performance using WGPU for GPU acceleration
-- Clean, responsive UI built with iced
+- Clean UI built with iced
 - FFmpeg integration for video processing
 
 ## Preview
@@ -98,7 +98,7 @@ Orbit Video Player is a personal learning project created for fun and to explore
 - [ ] File browser for video selection
 - [ ] Audio support integration
 - [ ] Keyboard shortcut system
-- [ ] Performance optimizations for high-resolution videos
+- [ ] Performance optimizations
 - [ ] Project saving/loading
 - [ ] Video export with applied shaders
 
@@ -113,17 +113,7 @@ Orbit Video Player is a personal learning project created for fun and to explore
 #### Shader System
 
 - [ ] Additional built-in shaders (Bloom, Color Grading, etc.)
-- [ ] Shader graph visualization
-- [ ] Real-time shader coding interface
 - [ ] Shader parameter presets
-- [ ] Timeline-based shader keyframing
-
-#### Advanced Features
-
-- [ ] Batch processing capabilities
-- [ ] Hardware acceleration optimizations
-- [ ] Plugin system for extended functionality
-- [ ] Multi-video compositing
 
 ## Performance Considerations
 
@@ -138,7 +128,6 @@ For optimal performance:
 
 - Start with lower resolution videos when using multiple complex shaders
 - Consider reducing shader parameter values that increase computational load
-- Close other GPU-intensive applications when processing high-resolution videos
 
 ## ⚠️ Resolution Compatibility Note
 
